@@ -595,7 +595,11 @@ class TelegramNotifier:
             deleted = await self._url_storage.remove(url_id, chat_id)
             if deleted:
                 self._list_pages[chat_id] = 0
-                await self._show_list_with_keyboard(chat_id, edit_msg_id=msg_id)
+                await self._client.edit_message_text(
+                    chat_id, msg_id,
+                    f"✅ URL <b>{name}</b> удалён.",
+                    reply_markup={"inline_keyboard": []},
+                )
                 logger.info("   ✅ URL #%s removed via inline keyboard by %s", url_id, chat_id)
             else:
                 await self._client.edit_message_text(
