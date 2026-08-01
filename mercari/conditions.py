@@ -124,6 +124,14 @@ def parse_search_url(url: str) -> SearchCondition:
     Молча игнорирует неизвестные параметры (фильтры, которые мы не поддерживаем).
     """
     parsed = urlparse(url.strip())
+
+    valid_search_paths = ("/search", "/en/search")
+    if parsed.path.rstrip("/") not in valid_search_paths:
+        raise ValueError(
+            f"This is not a Mercari search URL. "
+            f"Expected path like /search or /en/search, got: {parsed.path}"
+        )
+
     qs = parse_qs(parsed.query)
 
     logger.info("🔗 Parsing search URL: %s", url[:120])

@@ -1,6 +1,15 @@
+import re
 from dataclasses import dataclass
 
 MERCARI_ITEM_URL = "https://jp.mercari.com/item/{item_id}"
+SHOP_PRODUCT_URL = "https://jp.mercari.com/en/shops/product/{item_id}"
+
+_ITEM_ID_RE = re.compile(r"^m\d+$")
+
+
+def get_item_url(item_id: str) -> str:
+    template = MERCARI_ITEM_URL if _ITEM_ID_RE.match(item_id) else SHOP_PRODUCT_URL
+    return template.format(item_id=item_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,5 +27,5 @@ class Item:
             title=title,
             price=price,
             status=status,
-            url=MERCARI_ITEM_URL.format(item_id=item_id),
+            url=get_item_url(item_id),
         )
