@@ -44,14 +44,9 @@ async def format_url_list(
 ) -> str:
     if not urls:
         return "No tracked URLs.\nAdd one via the Add URL button"
-    lines = ["Your URLs:"]
     if page is not None and total_pages is not None:
-        lines.append(f"Страница {page + 1}/{total_pages}\n")
-    else:
-        lines.append("")
-    for row in urls:
-        lines.append(row.name)
-    return "\n".join(lines)
+        return f"Ваши URL (страница {page + 1}/{total_pages}):"
+    return "Ваши URL:"
 
 
 async def format_url_detail(row: SearchUrlRow, count_fn) -> str:
