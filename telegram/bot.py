@@ -290,10 +290,10 @@ class TelegramNotifier:
                 return
             if await self._url_storage.rename(url_id, chat_id, new_name):
                 logger.info("   ✅ URL #%s renamed to '%s' for user %s", url_id, new_name, chat_id)
-                await self.send_message(chat_id, f"✅ URL #{url_id} переименован в: {new_name}")
+                await self.send_message(chat_id, f"✅ URL переименован в: {new_name}")
             else:
                 logger.warning("   ⚠️  URL #%s not found for user %s", url_id, chat_id)
-                await self.send_message(chat_id, f"❌ URL #{url_id} не найден")
+                await self.send_message(chat_id, "❌ URL не найден")
             return
 
         # ── Button press ────────────────────────────────────────
@@ -580,12 +580,12 @@ class TelegramNotifier:
             if msg_id:
                 await self._client.edit_message_text(
                     chat_id, msg_id,
-                    f"✅ Выбран URL #{url_id} (<b>{selected.name}</b>).",
+                    f"✅ Выбран URL (<b>{selected.name}</b>).",
                 )
             await self._client.answer_callback_query(cb_id)
             await self.send_message(
                 chat_id,
-                f"✏️ Введите новое имя для URL #{url_id} (<b>{selected.name}</b>).",
+                f"✏️ Введите новое имя для URL (<b>{selected.name}</b>).",
                 keyboard_kind="cancel",
                 placeholder="Введите новое имя...",
             )

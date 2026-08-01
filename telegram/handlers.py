@@ -103,9 +103,9 @@ def make_handlers(
             watcher.force_reload()
             display_name = name or clean_url
             logger.info("   ✅ URL #%s added for user %s (name='%s')", url_id, chat_id, display_name)
-            return f"URL #{url_id} added\nName: {display_name}\n\nFirst check will start on next cycle"
+            return f"URL added\nName: {display_name}\n\nFirst check will start on next cycle"
         logger.info("   ℹ️  URL already exists for user %s (id=%s)", chat_id, url_id)
-        return f"URL already exists (ID: {url_id})"
+        return "URL already exists"
 
     async def cmd_remove(arg: str, chat_id: str, _user_id: str) -> str:
         logger.info("💬 /remove from user %s: '%s'", chat_id, arg)
@@ -115,9 +115,9 @@ def make_handlers(
         url_id = int(arg)
         if await url_storage.remove(url_id, chat_id):
             logger.info("   ✅ URL #%s removed for user %s", url_id, chat_id)
-            return f"URL #{url_id} deleted"
+            return "URL deleted"
         logger.warning("   ⚠️  URL #%s not found for user %s", url_id, chat_id)
-        return f"URL #{url_id} not found"
+        return "URL not found"
 
     async def cmd_rename(arg: str, chat_id: str, _user_id: str) -> str:
         logger.info("💬 /rename from user %s: '%s'", chat_id, arg[:80])
@@ -132,9 +132,9 @@ def make_handlers(
         name = new_name.strip()
         if await url_storage.rename(url_id, chat_id, name):
             logger.info("   ✅ URL #%s renamed to '%s' for user %s", url_id, name, chat_id)
-            return f"URL #{url_id} renamed to: {name}"
+            return f"URL renamed to: {name}"
         logger.warning("   ⚠️  URL #%s not found for user %s", url_id, chat_id)
-        return f"URL #{url_id} not found"
+        return "URL not found"
 
     async def cmd_list(_arg: str, chat_id: str, _user_id: str) -> str:
         logger.info("💬 /list from user %s", chat_id)

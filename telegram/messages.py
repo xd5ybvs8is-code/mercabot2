@@ -66,6 +66,7 @@ async def format_url_detail(row: SearchUrlRow, count_fn) -> str:
 
     return (
         f"<b>{row.name}</b>\n\n"
+        f"🔗 <b>URL парсинга:</b>\n{row.url}\n\n"
         f"📌 <b>Добавлен по:</b> {added_by}\n"
         f"📦 <b>Найдено товаров:</b> {count}"
     )
