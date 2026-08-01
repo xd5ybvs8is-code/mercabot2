@@ -3,86 +3,69 @@ from urllib.parse import parse_qs, urlparse
 
 from models.item import Item
 from storage.urls import SearchUrlRow
+from telegram.i18n import text
 
-HELP_TEXT = (
-    "❓ Помощь\n\n"
-    "Этот бот отслеживает новые объявления на Mercari Japan.\n\n"
-    "Когда появляется новое объявление, бот отправляет его название, цену и ссылку.\n\n"
-    "Основные действия:\n\n"
-    "➕ Добавить URL\n"
-    "Добавьте ссылку на поиск Mercari или укажите ключевое слово.\n\n"
-    "📋 Мои URL\n"
-    "Просмотрите все сохранённые поиски. Для каждого поиска можно:\n"
-    "• посмотреть подробности;\n"
-    "• переименовать его;\n"
-    "• удалить его.\n\n"
-    "Используйте только ссылки с домена jp.mercari.com."
-)
-
-STARTUP_MESSAGE = (
-    "Mercari Watcher started\n\n"
-    "Bot started tracking new listings."
-)
-
-SHUTDOWN_MESSAGE = (
-    "Mercari Watcher stopped\n\n"
-    "Bot has shut down."
-)
+def format_help(language: str) -> str:
+    return text("help", language)
 
 
-def format_item_notification(item: Item, search_name: str) -> str:
+def format_startup(language: str) -> str:
+    return text("startup", language)
+
+
+def format_shutdown(language: str) -> str:
+    return text("shutdown", language)
+
+
+def format_item_notification(item: Item, search_name: str, language: str = "ru") -> str:
     return (
         f"{escape(search_name)}\n\n"
-        "New listing\n\n"
-        f"Title:\n{escape(item.title)}\n\n"
-        f"Price:\n{item.price:,} JPY\n\n"
-        f"Link:\n{escape(item.url)}"
+        + text(
+            "new_listing",
+            language,
+            title=escape(item.title),
+            price=item.price,
+            url=escape(item.url),
+        )
     )
 
 
 async def format_url_list(
     urls: list[SearchUrlRow],
     page: int | None = None, total_pages: int | None = None,
+    language: str = "ru",
 ) -> str:
     if not urls:
-        return "No tracked URLs.\nAdd one via the Add URL button"
+        return text("no_urls", language)
     if page is not None and total_pages is not None:
-        return f"Ваши URL (страница {page + 1}/{total_pages}):"
-    return "Ваши URL:"
+        return text("url_list", language, page=page + 1, total=total_pages)
+    return text("url_list_short", language)
 
 
-async def format_url_detail(row: SearchUrlRow) -> str:
+async def format_url_detail(row: SearchUrlRow, language: str = "ru") -> str:
     parsed = urlparse(row.url)
     params = parse_qs(parsed.query)
-    added_by = "ключевому слову" if "keyword" in params else "прямой ссылке"
-
-    return (
-        f"<b>{escape(row.name)}</b>\n\n"
-        f"🔗 <b>URL парсинга:</b>\n{escape(row.url)}\n\n"
-        f"📌 <b>Добавлен по:</b> {added_by}"
+    added_by = text(
+        "keyword_source" if "keyword" in params else "url_source", language,
+    )
+    return text(
+        "url_detail", language,
+        name=escape(row.name), url=escape(row.url), source=added_by,
     )
 
 
 # ── Admin panel ─────────────────────────────────────────────────
 
-ADMIN_PANEL_TEXT = (
-    "🛠 <b>Админ-панель</b>\n\n"
-    "Доступные действия:\n"
-    "📊 <b>Статус бота</b> — сводка состояния\n"
-    "🔄 <b>Перезагрузить URL</b> — немедленный цикл проверки\n"
-    "⏸️ <b>Пауза</b> / ▶️ <b>Продолжить</b> — остановка/возобновление watcher'а\n"
-    "📢 <b>Рассылка всем</b> — отправить сообщение всем пользователям\n"
-    "🔙 <b>Назад</b> — выйти из админ-панели"
-)
+def format_admin_panel(language: str) -> str:
+    return text("admin_panel", language)
 
-ADMIN_BROADCAST_PROMPT = (
-    "📢 <b>Рассылка всем</b>\n\n"
-    "Отправьте текст сообщения, которое получат все пользователи бота.\n"
-    "Поддерживается HTML-разметка Telegram.\n\n"
-    "Для отмены отправьте /admin_back."
-)
 
-NOT_AUTHORIZED = "⛔ У вас нет прав администратора для этого действия."
+def format_broadcast_prompt(language: str) -> str:
+    return text("broadcast_prompt", language)
+
+
+def format_not_authorized(language: str) -> str:
+    return text("no_permission", language)
 
 
 def format_admin_status(
@@ -93,14 +76,12 @@ def format_admin_status(
     target_rate: int,
     active_urls: int,
     users: int,
+    language: str = "ru",
 ) -> str:
-    state = "⏸️ ПРИОСТАНОВЛЕН" if paused else "▶️ работает"
-    return (
-        "📊 <b>Статус бота</b>\n\n"
-        f"Watcher: {state}\n"
-        f"Очередь сообщений: {queue_size}\n"
-        f"Скорость отправки: {current_rate}/{target_rate} msg/s\n"
-        f"Активных URL: {active_urls}\n"
-        f"Пользователей: {users}"
+    state = text("paused" if paused else "running", language)
+    return text(
+        "admin_status", language,
+        state=state, queue=queue_size, current=current_rate,
+        target=target_rate, urls=active_urls, users=users,
     )
 

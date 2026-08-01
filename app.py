@@ -10,9 +10,10 @@ from mercari.devices import DeviceRegistry
 from mercari.watcher import MercariWatcher
 from storage.connection import DatabaseConnection
 from storage.urls import UrlStorage
+from storage.users import UserStorage
 from telegram.bot import TelegramNotifier
 from telegram.handlers import make_handlers
-from telegram.messages import STARTUP_MESSAGE, SHUTDOWN_MESSAGE
+from telegram.messages import format_shutdown, format_startup
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -43,14 +44,16 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop, watcher: MercariWa
 async def _notify_all_users(
     telegram: TelegramNotifier,
     url_storage: UrlStorage,
-    text: str,
+    message_key: str,
 ) -> None:
     """Sends a message to all users who have URLs in the database."""
     logger = logging.getLogger(__name__)
     chat_ids = await url_storage.get_all_user_chat_ids()
-    logger.info("Sending notification to %s users: %s", len(chat_ids), text[:80])
+    logger.info("Sending notification to %s users: %s", len(chat_ids), message_key)
     for chat_id in chat_ids:
-        await telegram.send_message(chat_id, text)
+        language = await telegram.get_language(chat_id)
+        message = format_startup(language) if message_key == "startup" else format_shutdown(language)
+        await telegram.send_message(chat_id, message)
     logger.info("Notification sent to all %s users", len(chat_ids))
 
 
@@ -90,6 +93,7 @@ async def main() -> None:
     logger.info("─" * 40)
     logger.info("STEP 3/7: Initializing URL storage...")
     url_storage = UrlStorage(db)
+    user_storage = UserStorage(db)
     active_urls = await url_storage.get_active_urls()
     logger.info("✅ URL storage initialized")
     logger.info("   Active search URLs: %s", len(active_urls))
@@ -126,6 +130,7 @@ async def main() -> None:
         chat_min_interval=settings.tg_chat_min_interval,
         admin_user_ids=settings.admin_user_ids,
         url_storage=url_storage,
+        user_storage=user_storage,
     )
     watcher = MercariWatcher(settings, url_storage, telegram, client, devices)
 
@@ -153,7 +158,7 @@ async def main() -> None:
     logger.info("🎯 BOT IS RUNNING")
     logger.info("=" * 50)
 
-    await _notify_all_users(telegram, url_storage, STARTUP_MESSAGE)
+    await _notify_all_users(telegram, url_storage, "startup")
     logger.info("Bot started. Users can interact via Telegram.")
 
     cleanup_task = asyncio.create_task(watcher.cleanup_loop())
@@ -171,7 +176,7 @@ async def main() -> None:
         logger.info("=" * 50)
 
         logger.info("  • Notifying users about shutdown...")
-        await _notify_all_users(telegram, url_storage, SHUTDOWN_MESSAGE)
+        await _notify_all_users(telegram, url_storage, "shutdown")
 
         logger.info("  • Stopping command polling...")
         stop_event.set()

@@ -74,6 +74,29 @@ CREATE TABLE IF NOT EXISTS user_devices (
 );
 """
 
+CREATE_TABLE_USERS_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    chat_id TEXT PRIMARY KEY,
+    language TEXT NOT NULL DEFAULT 'ru' CHECK (language IN ('ru', 'en')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+"""
+
+# Existing users are discovered from the tables that already contain their
+# chat IDs. They keep the requested default language: Russian.
+MIGRATE_EXISTING_USERS_SQL = """
+INSERT OR IGNORE INTO users (chat_id, language, created_at, updated_at)
+SELECT user_chat_id, 'ru', CAST(strftime('%s', 'now') AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER)
+FROM search_urls
+UNION
+SELECT user_chat_id, 'ru', CAST(strftime('%s', 'now') AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER)
+FROM user_devices
+UNION
+SELECT chat_id, 'ru', CAST(strftime('%s', 'now') AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER)
+FROM notification_outbox;
+"""
+
 
 class DatabaseConnection:
     """Manages async SQLite connection and schema creation."""
@@ -109,6 +132,9 @@ class DatabaseConnection:
         logger.debug("  • Creating table: notification_outbox...")
         await self._conn.execute(CREATE_TABLE_NOTIFICATION_OUTBOX_SQL)
         await self._conn.execute(CREATE_TABLE_USER_DEVICES_SQL)
+        logger.debug("  • Creating table: users...")
+        await self._conn.execute(CREATE_TABLE_USERS_SQL)
+        await self._conn.execute(MIGRATE_EXISTING_USERS_SQL)
         logger.debug("  • Creating index: idx_seen_items_url_id...")
         await self._conn.execute(CREATE_INDEX_SEEN_ITEMS_SQL)
         logger.debug("  • Creating index: idx_notification_outbox_created_at...")
@@ -118,7 +144,7 @@ class DatabaseConnection:
         logger.info("🗄️  DATABASE CONNECTED")
         logger.info("   Path: %s", self._db_path)
         logger.info("   Mode: WAL (Write-Ahead Logging)")
-        logger.info("   Tables: items, search_urls, seen_items")
+        logger.info("   Tables: items, search_urls, seen_items, users")
         logger.info("=" * 50)
 
     @asynccontextmanager

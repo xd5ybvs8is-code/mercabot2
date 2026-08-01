@@ -15,11 +15,16 @@ from telegram.keyboard import (
     build_list_items_inline_keyboard_paginated,
     build_url_detail_keyboard,
     build_rename_inline_keyboard,
+    build_language_keyboard,
+    LANGUAGE_BUTTON,
+    button_text,
 )
+from telegram.i18n import text as tr
 from telegram.messages import format_item_notification, format_url_detail, format_url_list
 from telegram.sender import MessageSender, Priority
 from models.item import Item
 from storage.urls import PendingNotification
+from storage.users import UserStorage
 
 if TYPE_CHECKING:
     from storage.urls import UrlStorage
@@ -31,7 +36,7 @@ POLL_INTERVAL = 2.0
 # Handler type: (argument, chat_id, user_id) -> response text (async).
 # user_id — Telegram account id отправителя (message.from.id), нужен для
 # проверки прав администратора в админ-командах.
-CommandHandler = Callable[[str, str, str], Awaitable[str]]
+CommandHandler = Callable[[str, str, str, str], Awaitable[str]]
 
 
 class TelegramNotifier:
@@ -44,10 +49,12 @@ class TelegramNotifier:
         chat_min_interval: float = 1.0,
         admin_user_ids: frozenset[str] = frozenset(),
         url_storage: "UrlStorage | None" = None,
+        user_storage: UserStorage | None = None,
     ) -> None:
         self._client = TelegramClient(token)
         self._admin_user_ids = admin_user_ids
         self._url_storage = url_storage
+        self._user_storage = user_storage
         self._sender = MessageSender(
             self._client,
             rate_per_sec=rate_per_sec,
@@ -104,6 +111,7 @@ class TelegramNotifier:
         keyboard_kind: str = "main",
         placeholder: str | None = None,
     ) -> bool:
+        language = await self._get_language(chat_id)
         self._sender.enqueue(
             chat_id,
             text,
@@ -111,6 +119,7 @@ class TelegramNotifier:
             show_keyboard=show_keyboard,
             priority=Priority.HIGH,
             keyboard_kind=keyboard_kind,
+            language=language,
             placeholder=placeholder,
         )
         return True
@@ -123,11 +132,13 @@ class TelegramNotifier:
         *,
         search_url_id: int | None = None,
     ) -> bool:
-        text = format_item_notification(item, search_name)
+        language = await self._get_language(chat_id)
+        notification_text = format_item_notification(item, search_name, language)
         if self._url_storage is None:
             self._sender.enqueue(
-                chat_id, text, disable_preview=False, show_keyboard=False,
+                chat_id, notification_text, disable_preview=False, show_keyboard=False,
                 priority=Priority.NORMAL,
+                language=language,
             )
             return True
 
@@ -137,7 +148,7 @@ class TelegramNotifier:
             search_url_id=search_url_id,
             item_id=item.id,
             chat_id=chat_id,
-            text=text,
+            text=notification_text,
         )
         if notification is not None:
             self._enqueue_pending_notification(notification)
@@ -157,8 +168,32 @@ class TelegramNotifier:
             disable_preview=False,
             show_keyboard=False,
             priority=Priority.NORMAL,
+            language="ru",
             on_success=acknowledge,
         )
+
+    async def _get_language(self, chat_id: str) -> str:
+        if self._user_storage is None:
+            return "ru"
+        return (await self._user_storage.get_language(chat_id)) or "ru"
+
+    async def get_language(self, chat_id: str) -> str:
+        """Return the selected language for a chat."""
+        return await self._get_language(chat_id)
+
+    async def _show_language_selection(self, chat_id: str, edit_msg_id: int | None = None) -> None:
+        payload = {
+            "chat_id": chat_id,
+            "text": tr("language_prompt", "ru"),
+            "reply_markup": build_language_keyboard(),
+        }
+        if edit_msg_id is not None:
+            await self._client.edit_message_text(
+                chat_id, edit_msg_id, payload["text"],
+                reply_markup=payload["reply_markup"],
+            )
+        else:
+            await self._client.call_api_json("sendMessage", payload)
 
     # ── Admin helpers ─────────────────────────────────────────────
 
@@ -232,14 +267,33 @@ class TelegramNotifier:
         # они совпадают, но семантически права привязаны к аккаунту.
         from_user = message.get("from") or {}
         user_id = str(from_user.get("id", ""))
+        language = await self._get_language(chat_id)
+
+        # The language button is available even while another flow is active.
+        if text == LANGUAGE_BUTTON:
+            self._awaiting.pop(chat_id, None)
+            await self._show_language_selection(chat_id)
+            return
+
+        stored_language = (
+            await self._user_storage.get_language(chat_id)
+            if self._user_storage is not None else "ru"
+        )
+        if stored_language is None:
+            await self._show_language_selection(chat_id)
+            return
+
+        if text.split(maxsplit=1)[0].lower() == "/start":
+            await self.send_message(chat_id, tr("welcome", language))
+            return
 
         # ── Cancel active action ────────────────────────────────
         state = self._awaiting.get(chat_id)
 
-        if state and text == "🔙 Назад":
+        if state and text in {button_text("back", language), "🔙 Назад", "🔙 Back"}:
             del self._awaiting[chat_id]
             logger.info("   → User %s cancelled awaiting state '%s'", chat_id, state.get("phase"))
-            await self.send_message(chat_id, "❌ Действие отменено.", keyboard_kind="main")
+            await self.send_message(chat_id, tr("cancelled", language), keyboard_kind="main")
             return
 
         # ── Awaiting input state ────────────────────────────────
@@ -251,7 +305,7 @@ class TelegramNotifier:
             if not self._is_admin(user_id):
                 logger.warning("⛔ Non-admin user %s in broadcast state — ignoring", chat_id)
                 del self._awaiting[chat_id]
-                await self.send_message(chat_id, "⛔ Нет прав для рассылки.")
+                await self.send_message(chat_id, tr("no_permission", language))
                 return
             del self._awaiting[chat_id]
             logger.info("   → Admin %s provided broadcast text", chat_id)
@@ -260,29 +314,24 @@ class TelegramNotifier:
 
         if state and state.get("phase") == "add_type":
             # Пользователь выбрал тип поиска на reply‑кнопках
-            if text == "🔗 URL":
+            if text in {button_text("url_type", language), "🔗 URL"}:
                 self._awaiting[chat_id] = {"phase": "add_name"}
                 logger.info("   → User %s chose URL flow, awaiting name", chat_id)
                 await self.send_message(
                     chat_id,
-                    "✏️ Придумайте имя для этого поиска.\n\n"
-                    "Например:\n"
-                    "Кроссовки Nike",
+                    tr("enter_search_name", language),
                     keyboard_kind="cancel",
-                    placeholder="Введите имя поиска...",
+                    placeholder=tr("name_placeholder", language),
                 )
                 return
-            if text == "🔤 Ключевое слово":
+            if text in {button_text("keyword_type", language), "🔤 Ключевое слово"}:
                 self._awaiting[chat_id] = {"phase": "add_keyword"}
                 logger.info("   → User %s chose keyword flow, awaiting keyword", chat_id)
                 await self.send_message(
                     chat_id,
-                    "🔤 Отправьте ключевое слово для поиска.\n\n"
-                    "Оно же будет использовано как имя.\n\n"
-                    "Например:\n"
-                    "Nike кроссовки",
+                    tr("enter_keyword", language),
                     keyboard_kind="cancel",
-                    placeholder="Введите ключевое слово...",
+                    placeholder=tr("keyword_placeholder", language),
                 )
                 return
 
@@ -293,12 +342,9 @@ class TelegramNotifier:
             logger.info("   → User %s entered name '%s', now awaiting URL", chat_id, name)
             await self.send_message(
                 chat_id,
-                "🔗 Отлично! Теперь отправьте URL для этого поиска.\n\n"
-                f"Имя: <b>{escape(name)}</b>\n\n"
-                "Пример URL:\n"
-                "https://jp.mercari.com/en/search?category_id=7021",
+                tr("enter_url", language, name=escape(name)),
                 keyboard_kind="cancel",
-                placeholder="Введите URL...",
+                placeholder=tr("url_placeholder", language),
             )
             return
 
@@ -326,14 +372,14 @@ class TelegramNotifier:
             del self._awaiting[chat_id]
             logger.info("   → User %s provided rename for URL #%s: '%s'", chat_id, url_id, new_name)
             if self._url_storage is None:
-                await self.send_message(chat_id, "❌ Внутренняя ошибка.")
+                await self.send_message(chat_id, tr("internal_error", language))
                 return
             if await self._url_storage.rename(url_id, chat_id, new_name):
                 logger.info("   ✅ URL #%s renamed to '%s' for user %s", url_id, new_name, chat_id)
-                await self.send_message(chat_id, f"✅ URL переименован в: {escape(new_name)}")
+                await self.send_message(chat_id, tr("url_renamed", language, name=escape(new_name)))
             else:
                 logger.warning("   ⚠️  URL #%s not found for user %s", url_id, chat_id)
-                await self.send_message(chat_id, "❌ URL не найден")
+                await self.send_message(chat_id, tr("url_not_found", language))
             return
 
         # ── Button press ────────────────────────────────────────
@@ -343,7 +389,7 @@ class TelegramNotifier:
         # Не-админу кнопка не видна, но он может ввести текст кнопки вручную.
         if action in ADMIN_BUTTON_ACTIONS and not self._is_admin(user_id):
             logger.warning("⛔ Non-admin user %s pressed admin button '%s'", chat_id, text)
-            await self.send_message(chat_id, "⛔ У вас нет прав администратора для этого действия.")
+            await self.send_message(chat_id, tr("no_permission", language))
             return
 
         if action == "__await_add__":
@@ -351,10 +397,14 @@ class TelegramNotifier:
             self._awaiting[chat_id] = {"phase": "add_type"}
             await self.send_message(
                 chat_id,
-                "📌 Выберите тип поиска:",
+                tr("choose_search_type", language),
                 keyboard_kind="add_type",
-                placeholder="Выберите URL или ключевое слово...",
+                placeholder=tr("type_placeholder", language),
             )
+            return
+
+        if action == "__language__":
+            await self._show_language_selection(chat_id)
             return
 
         if action == "__await_list__":
@@ -367,12 +417,11 @@ class TelegramNotifier:
             self._awaiting[chat_id] = {"phase": "broadcast"}
             # Ответ показываем с клавиатурой админ-панели, чтобы админ
             # оставался в контексте панели и мог нажать 🔙 Назад для отмены.
-            from telegram.messages import ADMIN_BROADCAST_PROMPT
             await self.send_message(
                 chat_id,
-                ADMIN_BROADCAST_PROMPT,
+                tr("broadcast_prompt", language),
                 keyboard_kind="admin",
-                placeholder="Введите текст рассылки...",
+                placeholder=tr("broadcast_placeholder", language),
             )
             return
 
@@ -394,17 +443,21 @@ class TelegramNotifier:
         await self._handle_command_text(chat_id, user_id, text)
 
     async def _show_list_with_keyboard(self, chat_id: str, edit_msg_id: int | None = None) -> None:
+        language = await self._get_language(chat_id)
         if self._url_storage is None:
             if edit_msg_id:
-                await self._client.edit_message_text(chat_id, edit_msg_id, "❌ Внутренняя ошибка.")
+                await self._client.edit_message_text(chat_id, edit_msg_id, tr("internal_error", language))
             else:
-                await self.send_message(chat_id, "❌ Внутренняя ошибка.")
+                await self.send_message(chat_id, tr("internal_error", language))
             return
         urls = await self._url_storage.get_user_urls(chat_id)
         if not urls:
             self._list_pages.pop(chat_id, None)
-            text = "У вас нет отслеживаемых URL.\nДобавьте через кнопку ➕ Добавить URL"
-            markup = {"inline_keyboard": [[{"text": "🔙 Назад", "callback_data": "list_back"}]]}
+            list_text = tr("no_urls", language)
+            markup = {"inline_keyboard": [[{
+                "text": "🔙 Back" if language == "en" else "🔙 Назад",
+                "callback_data": "list_back",
+            }]]}
         else:
             page = self._list_pages.get(chat_id, 0)
             total_pages = (len(urls) + PAGE_SIZE - 1) // PAGE_SIZE
@@ -415,21 +468,24 @@ class TelegramNotifier:
             start = page * PAGE_SIZE
             page_urls = urls[start:start + PAGE_SIZE]
 
-            text = await format_url_list(
+            list_text = await format_url_list(
                 page_urls,
                 page=page, total_pages=total_pages,
+                language=language,
             )
-            markup = build_list_items_inline_keyboard_paginated(page_urls, page, total_pages)
+            markup = build_list_items_inline_keyboard_paginated(
+                page_urls, page, total_pages, language=language,
+            )
 
         if edit_msg_id:
             ok = await self._client.edit_message_text(
-                chat_id, edit_msg_id, text, reply_markup=markup,
+                chat_id, edit_msg_id, list_text, reply_markup=markup,
             )
             if not ok:
                 logger.warning("⚠️  Failed to edit message for chat=%s, sending new message", chat_id)
                 payload = {
                     "chat_id": chat_id,
-                    "text": text,
+                    "text": list_text,
                     "parse_mode": "HTML",
                     "reply_markup": markup,
                 }
@@ -437,7 +493,7 @@ class TelegramNotifier:
         else:
             payload = {
                 "chat_id": chat_id,
-                "text": text,
+                "text": list_text,
                 "parse_mode": "HTML",
                 "reply_markup": markup,
             }
@@ -467,12 +523,43 @@ class TelegramNotifier:
         except Exception:
             logger.exception("❌ Unhandled error in callback handler (data='%s')", data)
             try:
-                await self._client.answer_callback_query(cb_id, "Произошла ошибка", show_alert=True)
+                await self._client.answer_callback_query(
+                    cb_id,
+                    "An error occurred" if await self._get_language(chat_id) == "en" else "Произошла ошибка",
+                    show_alert=True,
+                )
             except Exception:
                 logger.exception("❌ Failed to answer callback query after error")
 
 
     async def _dispatch_callback(self, cb_id: str, data: str, chat_id: str, msg_id: int | None) -> None:
+        language = await self._get_language(chat_id)
+        if data == "change_language":
+            await self._show_language_selection(chat_id, edit_msg_id=msg_id)
+            await self._client.answer_callback_query(cb_id)
+            return
+
+        if data in {"lang_ru", "lang_en"}:
+            language = data.removeprefix("lang_")
+            previous_language = (
+                await self._user_storage.get_language(chat_id)
+                if self._user_storage is not None else None
+            )
+            if self._user_storage is not None:
+                await self._user_storage.set_language(chat_id, language)
+            if msg_id:
+                await self._client.edit_message_text(
+                    chat_id, msg_id, tr("language_saved", language),
+                    reply_markup={"inline_keyboard": []},
+                )
+            await self._client.answer_callback_query(cb_id)
+            await self.send_message(
+                chat_id,
+                tr("welcome" if previous_language is None else "language_changed", language),
+                keyboard_kind="main",
+            )
+            return
+
         if data == "list_back":
             self._list_pages[chat_id] = 0
             await self._show_list_with_keyboard(chat_id, edit_msg_id=msg_id)
@@ -499,10 +586,10 @@ class TelegramNotifier:
             try:
                 url_id = int(data[5:])
             except ValueError:
-                await self._client.answer_callback_query(cb_id, "Ошибка: некорректный ID")
+                await self._client.answer_callback_query(cb_id, "Invalid ID" if language == "en" else "Некорректный ID")
                 return
             if self._url_storage is None:
-                await self._client.answer_callback_query(cb_id, "Внутренняя ошибка", show_alert=True)
+                await self._client.answer_callback_query(cb_id, tr("internal_error", language), show_alert=True)
                 return
             urls = await self._url_storage.get_user_urls(chat_id)
             selected = None
@@ -511,10 +598,10 @@ class TelegramNotifier:
                     selected = r
                     break
             if selected is None:
-                await self._client.answer_callback_query(cb_id, "URL не найден", show_alert=True)
+                await self._client.answer_callback_query(cb_id, tr("url_not_found", language), show_alert=True)
                 return
-            detail_text = await format_url_detail(selected)
-            markup = build_url_detail_keyboard(url_id)
+            detail_text = await format_url_detail(selected, language)
+            markup = build_url_detail_keyboard(url_id, language)
             if msg_id:
                 await self._client.edit_message_text(
                     chat_id, msg_id,
@@ -527,28 +614,28 @@ class TelegramNotifier:
         if data == "cancel_rename":
             if msg_id:
                 await self._client.edit_message_text(
-                    chat_id, msg_id, "❌ Переименование отменено.",
+                    chat_id, msg_id, tr("rename_cancelled", language),
                 )
             await self._client.answer_callback_query(cb_id)
             return
 
         if data == "rename_list":
             if self._url_storage is None:
-                await self._client.answer_callback_query(cb_id, "Внутренняя ошибка", show_alert=True)
+                await self._client.answer_callback_query(cb_id, tr("internal_error", language), show_alert=True)
                 return
             urls = await self._url_storage.get_user_urls(chat_id)
             if not urls:
                 if msg_id:
                     await self._client.edit_message_text(
-                        chat_id, msg_id, "У вас нет отслеживаемых URL.",
+                        chat_id, msg_id, tr("no_urls", language),
                     )
                 await self._client.answer_callback_query(cb_id)
                 return
-            markup = build_rename_inline_keyboard(urls)
+            markup = build_rename_inline_keyboard(urls, language)
             if msg_id:
                 await self._client.edit_message_text(
                     chat_id, msg_id,
-                    "✏️ <b>Выберите URL для переименования:</b>",
+                    tr("rename_choose", language),
                     reply_markup=markup,
                 )
             await self._client.answer_callback_query(cb_id)
@@ -558,7 +645,7 @@ class TelegramNotifier:
             try:
                 url_id = int(data[4:])
             except ValueError:
-                await self._client.answer_callback_query(cb_id, "Ошибка: некорректный ID")
+                await self._client.answer_callback_query(cb_id, "Invalid ID" if language == "en" else "Некорректный ID")
                 return
             urls = await self._url_storage.get_user_urls(chat_id)  # type: ignore[union-attr]
             selected = None
@@ -567,21 +654,21 @@ class TelegramNotifier:
                     selected = r
                     break
             if selected is None:
-                await self._client.answer_callback_query(cb_id, "URL не найден", show_alert=True)
+                await self._client.answer_callback_query(cb_id, tr("url_not_found", language), show_alert=True)
                 return
             self._awaiting[chat_id] = {"phase": "rename", "url_id": str(url_id)}
             logger.info("   ✏️  Rename flow started for URL #%s by user %s", url_id, chat_id)
             if msg_id:
                 await self._client.edit_message_text(
                     chat_id, msg_id,
-                    f"✅ Выбран URL (<b>{escape(selected.name)}</b>).",
+                    tr("rename_selected", language, name=escape(selected.name)),
                 )
             await self._client.answer_callback_query(cb_id)
             await self.send_message(
                 chat_id,
-                f"✏️ Введите новое имя для URL (<b>{escape(selected.name)}</b>).",
+                tr("rename_prompt", language, name=escape(selected.name)),
                 keyboard_kind="cancel",
-                placeholder="Введите новое имя...",
+                placeholder="Enter a new name..." if language == "en" else "Введите новое имя...",
             )
             return
 
@@ -595,7 +682,7 @@ class TelegramNotifier:
             try:
                 url_id = int(data[4:])
             except ValueError:
-                await self._client.answer_callback_query(cb_id, "Ошибка: некорректный ID")
+                await self._client.answer_callback_query(cb_id, "Invalid ID" if language == "en" else "Некорректный ID")
                 return
             urls = await self._url_storage.get_user_urls(chat_id)  # type: ignore[union-attr]
             selected = None
@@ -604,16 +691,20 @@ class TelegramNotifier:
                     selected = r
                     break
             if selected is None:
-                await self._client.answer_callback_query(cb_id, "URL не найден", show_alert=True)
+                await self._client.answer_callback_query(cb_id, tr("url_not_found", language), show_alert=True)
                 return
-            markup = build_confirm_delete_keyboard(url_id)
+            markup = build_confirm_delete_keyboard(url_id, language)
             ok = await self._client.edit_message_text(
                 chat_id, msg_id,
-                f"🗑 Удалить URL <b>{escape(selected.name)}</b>?",
+                tr("delete_confirm", language, name=escape(selected.name)),
                 reply_markup=markup,
             )
             if not ok:
-                await self._client.answer_callback_query(cb_id, "Ошибка при обновлении сообщения", show_alert=True)
+                await self._client.answer_callback_query(
+                    cb_id,
+                    "Error updating the message" if language == "en" else "Ошибка при обновлении сообщения",
+                    show_alert=True,
+                )
                 return
             await self._client.answer_callback_query(cb_id)
             return
@@ -622,10 +713,10 @@ class TelegramNotifier:
             try:
                 url_id = int(data[8:])
             except ValueError:
-                await self._client.answer_callback_query(cb_id, "Ошибка: некорректный ID")
+                await self._client.answer_callback_query(cb_id, "Invalid ID" if language == "en" else "Некорректный ID")
                 return
             if self._url_storage is None:
-                await self._client.answer_callback_query(cb_id, "Внутренняя ошибка", show_alert=True)
+                await self._client.answer_callback_query(cb_id, tr("internal_error", language), show_alert=True)
                 return
             # Найти имя до удаления
             urls = await self._url_storage.get_user_urls(chat_id)
@@ -639,14 +730,14 @@ class TelegramNotifier:
                 self._list_pages[chat_id] = 0
                 await self._client.edit_message_text(
                     chat_id, msg_id,
-                    f"✅ URL <b>{escape(name)}</b> удалён.",
+                    tr("deleted", language, name=escape(name)),
                     reply_markup={"inline_keyboard": []},
                 )
                 logger.info("   ✅ URL #%s removed via inline keyboard by %s", url_id, chat_id)
             else:
                 await self._client.edit_message_text(
                     chat_id, msg_id,
-                    f"❌ URL <b>{escape(name)}</b> не найден.",
+                    tr("not_found_named", language, name=escape(name)),
                 )
             await self._client.answer_callback_query(cb_id)
             return
@@ -674,7 +765,7 @@ class TelegramNotifier:
             keyboard_kind = "main"
         placeholder: str | None = None
         if command == "/admin_broadcast" and not argument:
-            placeholder = "Введите текст рассылки..."
+            placeholder = tr("broadcast_placeholder", await self._get_language(chat_id))
         await self._run_handler(command, argument, chat_id, user_id, keyboard_kind=keyboard_kind, placeholder=placeholder)
 
     async def _run_handler(
@@ -687,17 +778,17 @@ class TelegramNotifier:
         placeholder: str | None = None,
     ) -> None:
         handler = self._command_handlers.get(command)
+        language = await self._get_language(chat_id)
         if handler is None:
             logger.warning("   ❌ Unknown command '%s' from user %s", command, chat_id)
             await self.send_message(
                 chat_id,
-                f"❌ Неизвестная команда: {escape(command)}\n\n"
-                "Используй кнопки внизу или /help для справки.",
+                tr("unknown_command", language, command=escape(command)),
             )
             return
         logger.info("   ⚡ Executing handler for '%s' (user=%s)", command, chat_id)
         try:
-            response = await handler(argument, chat_id, user_id)
+            response = await handler(argument, chat_id, user_id, language)
             logger.info("   ✅ Handler '%s' returned response (%s chars)", command, len(response))
             await self.send_message(
                 chat_id, response,
@@ -707,6 +798,6 @@ class TelegramNotifier:
         except Exception as exc:
             logger.exception("   ❌ Command handler error for '%s'", command)
             await self.send_message(
-                chat_id, f"❌ Ошибка: {escape(str(exc))}",
+                chat_id, tr("error", language, error=escape(str(exc))),
                 keyboard_kind=keyboard_kind,
             )

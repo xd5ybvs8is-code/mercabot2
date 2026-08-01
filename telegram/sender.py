@@ -49,6 +49,7 @@ class OutgoingMessage:
     # Какую клавиатуру прикрепить: "main" (по умолчанию), "admin" (меню админ-панели),
     # "none" (без клавиатуры — для системных/разовых сообщений).
     keyboard_kind: str = field(default="main", compare=False)
+    language: str = field(default="ru", compare=False)
     # Подсказка в поле ввода (input_field_placeholder в ReplyKeyboardMarkup).
     placeholder: str | None = field(default=None, compare=False)
     # Счётчик неудачных попыток отправки. После _MAX_ATTEMPTS сообщение дропается.
@@ -137,6 +138,7 @@ class MessageSender:
         show_keyboard: bool = True,
         priority: int = Priority.NORMAL,
         keyboard_kind: str = "main",
+        language: str = "ru",
         placeholder: str | None = None,
         on_success: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
@@ -156,6 +158,7 @@ class MessageSender:
             disable_preview=disable_preview,
             show_keyboard=show_keyboard,
             keyboard_kind=keyboard_kind,
+            language=language,
             placeholder=placeholder,
             on_success=on_success,
         )
@@ -267,22 +270,28 @@ class MessageSender:
             )
 
             if msg.keyboard_kind == "cancel":
-                payload["reply_markup"] = build_cancel_keyboard_markup(placeholder=msg.placeholder)
+                payload["reply_markup"] = build_cancel_keyboard_markup(
+                    language=msg.language, placeholder=msg.placeholder,
+                )
             elif msg.keyboard_kind == "add_type":
-                payload["reply_markup"] = build_add_type_keyboard_markup(placeholder=msg.placeholder)
+                payload["reply_markup"] = build_add_type_keyboard_markup(
+                    language=msg.language, placeholder=msg.placeholder,
+                )
             elif msg.keyboard_kind == "admin":
                 # Меню админ-панели — только для админа; на всякий случай
                 # перепроверяем права, чтобы не показать админ-кнопки не-админу.
                 is_admin = msg.chat_id in self._admin_user_ids
                 payload["reply_markup"] = (
-                    build_admin_keyboard_markup(placeholder=msg.placeholder)
+                    build_admin_keyboard_markup(language=msg.language, placeholder=msg.placeholder)
                     if is_admin
-                    else build_keyboard_markup(False, placeholder=msg.placeholder)
+                    else build_keyboard_markup(False, language=msg.language, placeholder=msg.placeholder)
                 )
             else:
                 # Основная клавиатура: админ видит доп. ряд с входом в панель.
                 is_admin = msg.chat_id in self._admin_user_ids
-                payload["reply_markup"] = build_keyboard_markup(is_admin, placeholder=msg.placeholder)
+                payload["reply_markup"] = build_keyboard_markup(
+                    is_admin, language=msg.language, placeholder=msg.placeholder,
+                )
 
         try:
             ok = await self._client.call_api("sendMessage", payload)
