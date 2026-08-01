@@ -2,7 +2,7 @@ from typing import Any
 
 # Reply keyboard layout — основные кнопки, видимые всем пользователям.
 MAIN_KEYBOARD: list[list[dict[str, str]]] = [
-    [{"text": "📋 Список"}, {"text": "📊 Статистика"}],
+    [{"text": "📋 Список"}],
     [{"text": "➕ Добавить URL"}, {"text": "❌ Удалить URL"}],
     [{"text": "❓ Помощь"}],
 ]
@@ -102,7 +102,7 @@ def build_add_type_keyboard_markup(
 BUTTON_ACTIONS: dict[str, str] = {
     # ── основные ──
     "📋 Список": "__await_list__",
-    "📊 Статистика": "/stats",
+
     "➕ Добавить URL": "__await_add__",
     "❌ Удалить URL": "__await_remove__",
     "❓ Помощь": "/help",

@@ -430,7 +430,7 @@ class TelegramNotifier:
             page_urls = urls[start:start + PAGE_SIZE]
 
             text = await format_url_list(
-                page_urls, self._url_storage.count_items,
+                page_urls,
                 page=page, total_pages=total_pages,
             )
             markup = build_list_items_inline_keyboard_paginated(page_urls, page, total_pages)

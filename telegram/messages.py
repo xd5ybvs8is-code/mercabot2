@@ -10,7 +10,6 @@ HELP_TEXT = (
     "/remove <id> -- delete search by ID\n"
     "/rename <id> | <new name> -- rename search\n"
     "/list -- show all tracked searches\n"
-    "/stats -- statistics per search\n"
     "/help -- this message\n\n"
     "Keyword example:\n"
     "/add Nike Sneakers | My Search\n\n"
@@ -40,7 +39,7 @@ def format_item_notification(item: Item, search_name: str) -> str:
 
 
 async def format_url_list(
-    urls: list[SearchUrlRow], count_fn,
+    urls: list[SearchUrlRow],
     page: int | None = None, total_pages: int | None = None,
 ) -> str:
     if not urls:
@@ -51,9 +50,7 @@ async def format_url_list(
     else:
         lines.append("")
     for row in urls:
-        count = await count_fn(row.id)
         lines.append(row.name)
-        lines.append(f"   Items found: {count}")
     return "\n".join(lines)
 
 
@@ -70,17 +67,6 @@ async def format_url_detail(row: SearchUrlRow, count_fn) -> str:
         f"📌 <b>Добавлен по:</b> {added_by}\n"
         f"📦 <b>Найдено товаров:</b> {count}"
     )
-
-
-async def format_stats(urls: list[SearchUrlRow], count_fn) -> str:
-    if not urls:
-        return "No data"
-    lines = ["Statistics:\n"]
-    for row in urls:
-        count = await count_fn(row.id)
-        lines.append(row.name)
-        lines.append(f"   Items: {count}")
-    return "\n".join(lines)
 
 
 # ── Admin panel ─────────────────────────────────────────────────

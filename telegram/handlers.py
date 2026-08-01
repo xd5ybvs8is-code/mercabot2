@@ -12,7 +12,6 @@ from telegram.messages import (
     NOT_AUTHORIZED,
     format_admin_status,
     format_url_list,
-    format_stats,
 )
 
 logger = logging.getLogger(__name__)
@@ -140,13 +139,7 @@ def make_handlers(
         logger.info("💬 /list from user %s", chat_id)
         urls = await url_storage.get_user_urls(chat_id)
         logger.info("   📋 User %s has %s URL(s)", chat_id, len(urls))
-        return await format_url_list(urls, url_storage.count_items)
-
-    async def cmd_stats(_arg: str, chat_id: str, _user_id: str) -> str:
-        logger.info("💬 /stats from user %s", chat_id)
-        urls = await url_storage.get_user_urls(chat_id)
-        logger.info("   📊 Generating stats for user %s (%s URLs)", chat_id, len(urls))
-        return await format_stats(urls, url_storage.count_items)
+        return await format_url_list(urls)
 
     async def cmd_reload(_arg: str, chat_id: str, user_id: str) -> str:
         if not _is_admin(user_id):
@@ -248,7 +241,6 @@ def make_handlers(
         "/remove": cmd_remove,
         "/rename": cmd_rename,
         "/list": cmd_list,
-        "/stats": cmd_stats,
         "/reload": cmd_reload,
         # ── администраторские ──
         "/admin_panel": cmd_admin_panel,
