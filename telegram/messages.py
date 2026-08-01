@@ -39,13 +39,20 @@ def format_item_notification(item: Item, search_name: str) -> str:
     )
 
 
-async def format_url_list(urls: list[SearchUrlRow], count_fn) -> str:
+async def format_url_list(
+    urls: list[SearchUrlRow], count_fn,
+    page: int | None = None, total_pages: int | None = None,
+) -> str:
     if not urls:
         return "No tracked URLs.\nAdd one via the Add URL button"
-    lines = ["Your URLs:\n"]
+    lines = ["Your URLs:"]
+    if page is not None and total_pages is not None:
+        lines.append(f"Страница {page + 1}/{total_pages}\n")
+    else:
+        lines.append("")
     for row in urls:
         count = await count_fn(row.id)
-        lines.append(f"#{row.id} -- {row.name}")
+        lines.append(row.name)
         lines.append(f"   Items found: {count}")
     return "\n".join(lines)
 
@@ -58,8 +65,7 @@ async def format_url_detail(row: SearchUrlRow, count_fn) -> str:
     count = await count_fn(row.id)
 
     return (
-        f"<b>#{row.id} — {row.name}</b>\n\n"
-        f"🔗 <b>URL парсинга:</b>\n{row.url}\n\n"
+        f"<b>{row.name}</b>\n\n"
         f"📌 <b>Добавлен по:</b> {added_by}\n"
         f"📦 <b>Найдено товаров:</b> {count}"
     )
@@ -71,7 +77,7 @@ async def format_stats(urls: list[SearchUrlRow], count_fn) -> str:
     lines = ["Statistics:\n"]
     for row in urls:
         count = await count_fn(row.id)
-        lines.append(f"#{row.id} -- {row.name}")
+        lines.append(row.name)
         lines.append(f"   Items: {count}")
     return "\n".join(lines)
 
