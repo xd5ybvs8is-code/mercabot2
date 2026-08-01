@@ -61,6 +61,15 @@ class TelegramClient:
             try:
                 async with self.session.post(url, json=payload) as response:
                     if response.status == 200:
+                        data = await response.json()
+                        if not data.get("ok"):
+                            logger.error(
+                                "❌ Telegram %s API error: %s (error_code=%s)",
+                                method,
+                                data.get("description", "unknown"),
+                                data.get("error_code", "N/A"),
+                            )
+                            return False
                         logger.debug("✅ Telegram %s: HTTP 200", method)
                         return True
                     if response.status == 429:
@@ -114,6 +123,14 @@ class TelegramClient:
                 async with self.session.post(url, json=payload) as response:
                     if response.status == 200:
                         data = await response.json()
+                        if not data.get("ok"):
+                            logger.error(
+                                "❌ Telegram %s API error: %s (error_code=%s)",
+                                method,
+                                data.get("description", "unknown"),
+                                data.get("error_code", "N/A"),
+                            )
+                            return None
                         logger.debug("✅ Telegram %s: HTTP 200", method)
                         return data
                     if response.status == 429:
@@ -128,6 +145,7 @@ class TelegramClient:
                         "❌ Telegram API error (attempt %s/%s): %s %s",
                         attempt, MAX_RETRIES, response.status, body,
                     )
+                    return None
             except TelegramRateLimitError:
                 raise
             except (asyncio.TimeoutError, aiohttp.ClientError) as exc:

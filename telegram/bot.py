@@ -380,9 +380,18 @@ class TelegramNotifier:
             markup = build_list_items_inline_keyboard_paginated(page_urls, page, total_pages)
 
         if edit_msg_id:
-            await self._client.edit_message_text(
+            ok = await self._client.edit_message_text(
                 chat_id, edit_msg_id, text, reply_markup=markup,
             )
+            if not ok:
+                logger.warning("⚠️  Failed to edit message for chat=%s, sending new message", chat_id)
+                payload = {
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "reply_markup": markup,
+                }
+                await self._client.call_api_json("sendMessage", payload)
         else:
             payload = {
                 "chat_id": chat_id,
@@ -411,6 +420,17 @@ class TelegramNotifier:
 
         logger.info("👆 Callback from chat=%s, data='%s'", chat_id, data)
 
+        try:
+            await self._dispatch_callback(cb_id, data, chat_id, msg_id)
+        except Exception:
+            logger.exception("❌ Unhandled error in callback handler (data='%s')", data)
+            try:
+                await self._client.answer_callback_query(cb_id, "Произошла ошибка", show_alert=True)
+            except Exception:
+                logger.exception("❌ Failed to answer callback query after error")
+
+
+    async def _dispatch_callback(self, cb_id: str, data: str, chat_id: str, msg_id: int | None) -> None:
         if data == "list_back":
             self._list_pages[chat_id] = 0
             await self._show_list_with_keyboard(chat_id, edit_msg_id=msg_id)
@@ -545,11 +565,14 @@ class TelegramNotifier:
                 await self._client.answer_callback_query(cb_id, "URL не найден", show_alert=True)
                 return
             markup = build_confirm_delete_keyboard(url_id)
-            await self._client.edit_message_text(
+            ok = await self._client.edit_message_text(
                 chat_id, msg_id,
                 f"🗑 Удалить URL <b>{selected.name}</b>?",
                 reply_markup=markup,
             )
+            if not ok:
+                await self._client.answer_callback_query(cb_id, "Ошибка при обновлении сообщения", show_alert=True)
+                return
             await self._client.answer_callback_query(cb_id)
             return
 
