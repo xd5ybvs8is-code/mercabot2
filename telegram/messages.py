@@ -4,17 +4,18 @@ from models.item import Item
 from storage.urls import SearchUrlRow
 
 HELP_TEXT = (
-    "Mercari Watcher Bot\n\n"
-    "Commands:\n\n"
-    "/add <keyword or url> | <name> -- add search to track\n"
-    "/remove <id> -- delete search by ID\n"
-    "/rename <id> | <new name> -- rename search\n"
-    "/list -- show all tracked searches\n"
-    "/help -- this message\n\n"
-    "Keyword example:\n"
-    "/add Nike Sneakers | My Search\n\n"
-    "URL example:\n"
-    "/add https://jp.mercari.com/en/search?category_id=7021 | Nike Sneakers"
+    "❓ Помощь\n\n"
+    "Этот бот отслеживает новые объявления на Mercari Japan.\n\n"
+    "Когда появляется новое объявление, бот отправляет его название, цену и ссылку.\n\n"
+    "Основные действия:\n\n"
+    "➕ Добавить URL\n"
+    "Добавьте ссылку на поиск Mercari или укажите ключевое слово.\n\n"
+    "📋 Мои URL\n"
+    "Просмотрите все сохранённые поиски. Для каждого поиска можно:\n"
+    "• посмотреть подробности;\n"
+    "• переименовать его;\n"
+    "• удалить его.\n\n"
+    "Используйте только ссылки с домена jp.mercari.com."
 )
 
 STARTUP_MESSAGE = (
