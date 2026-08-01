@@ -10,7 +10,6 @@ from telegram.keyboard import (
     BUTTON_ACTIONS,
     ADMIN_BUTTON_ACTIONS,
     PAGE_SIZE,
-    build_remove_inline_keyboard_paginated,
     build_confirm_delete_keyboard,
     build_list_items_inline_keyboard_paginated,
     build_url_detail_keyboard,
@@ -62,9 +61,8 @@ class TelegramNotifier:
         self._awaiting: dict[str, dict[str, str]] = {}
         # message_id последнего inline-сообщения для editMessageText (по chat_id)
         self._inline_msg_ids: dict[str, int] = {}
-        # Текущая страница пагинации для списка и удаления (по chat_id)
+        # Текущая страница пагинации для списка (по chat_id)
         self._list_pages: dict[str, int] = {}
-        self._remove_pages: dict[str, int] = {}
 
     async def start(self) -> None:
         logger.info("⏳ Starting Telegram bot...")
@@ -317,11 +315,6 @@ class TelegramNotifier:
             )
             return
 
-        if action == "__await_remove__":
-            logger.info("   → User %s pressed 'Remove' button", chat_id)
-            await self._send_remove_inline_keyboard(chat_id)
-            return
-
         if action == "__await_list__":
             logger.info("   → User %s pressed 'List' button", chat_id)
             await self._show_list_with_keyboard(chat_id)
@@ -357,55 +350,6 @@ class TelegramNotifier:
         # ── Plain text as command ───────────────────────────────
         logger.info("   → User %s sent text, treating as command", chat_id)
         await self._handle_command_text(chat_id, user_id, text)
-
-    async def _send_remove_inline_keyboard(
-        self, chat_id: str, edit_msg_id: int | None = None,
-    ) -> None:
-        if self._url_storage is None:
-            await self.send_message(chat_id, "❌ Внутренняя ошибка.")
-            return
-        urls = await self._url_storage.get_user_urls(chat_id)
-        if not urls:
-            self._remove_pages.pop(chat_id, None)
-            if edit_msg_id:
-                await self._client.edit_message_text(
-                    chat_id, edit_msg_id,
-                    "У вас нет отслеживаемых URL для удаления.",
-                )
-            else:
-                await self.send_message(chat_id, "У вас нет отслеживаемых URL для удаления.")
-            return
-
-        page = self._remove_pages.get(chat_id, 0)
-        total_pages = (len(urls) + PAGE_SIZE - 1) // PAGE_SIZE
-        if page >= total_pages:
-            page = total_pages - 1
-        self._remove_pages[chat_id] = page
-
-        start = page * PAGE_SIZE
-        page_urls = urls[start:start + PAGE_SIZE]
-
-        text = f"🗑 <b>Выберите URL для удаления:</b>\nСтраница {page + 1}/{total_pages}"
-        markup = build_remove_inline_keyboard_paginated(page_urls, page, total_pages)
-
-        if edit_msg_id:
-            await self._client.edit_message_text(
-                chat_id, edit_msg_id, text, reply_markup=markup,
-            )
-        else:
-            payload = {
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "reply_markup": markup,
-            }
-            result = await self._client.call_api_json("sendMessage", payload)
-            if result and result.get("ok"):
-                msg = result.get("result", {})
-                msg_id = msg.get("message_id")
-                if msg_id:
-                    self._inline_msg_ids[chat_id] = msg_id
-                    logger.debug("   📌 Inline msg_id=%s saved for chat=%s", msg_id, chat_id)
 
     async def _show_list_with_keyboard(self, chat_id: str, edit_msg_id: int | None = None) -> None:
         if self._url_storage is None:
@@ -482,18 +426,6 @@ class TelegramNotifier:
         if data == "list_next":
             self._list_pages[chat_id] = self._list_pages.get(chat_id, 0) + 1
             await self._show_list_with_keyboard(chat_id, edit_msg_id=msg_id)
-            await self._client.answer_callback_query(cb_id)
-            return
-
-        if data == "remove_prev":
-            self._remove_pages[chat_id] = max(0, self._remove_pages.get(chat_id, 0) - 1)
-            await self._send_remove_inline_keyboard(chat_id, edit_msg_id=msg_id)
-            await self._client.answer_callback_query(cb_id)
-            return
-
-        if data == "remove_next":
-            self._remove_pages[chat_id] = self._remove_pages.get(chat_id, 0) + 1
-            await self._send_remove_inline_keyboard(chat_id, edit_msg_id=msg_id)
             await self._client.answer_callback_query(cb_id)
             return
 
@@ -592,11 +524,8 @@ class TelegramNotifier:
             return
 
         if data == "cancel_del":
-            self._remove_pages.pop(chat_id, None)
-            if msg_id:
-                await self._client.edit_message_text(
-                    chat_id, msg_id, "❌ Удаление отменено.",
-                )
+            self._list_pages[chat_id] = 0
+            await self._show_list_with_keyboard(chat_id, edit_msg_id=msg_id)
             await self._client.answer_callback_query(cb_id)
             return
 
@@ -642,10 +571,8 @@ class TelegramNotifier:
                     break
             deleted = await self._url_storage.remove(url_id, chat_id)
             if deleted:
-                await self._client.edit_message_text(
-                    chat_id, msg_id,
-                    f"✅ URL <b>{name}</b> удалён.",
-                )
+                self._list_pages[chat_id] = 0
+                await self._show_list_with_keyboard(chat_id, edit_msg_id=msg_id)
                 logger.info("   ✅ URL #%s removed via inline keyboard by %s", url_id, chat_id)
             else:
                 await self._client.edit_message_text(

@@ -3,7 +3,7 @@ from typing import Any
 # Reply keyboard layout — основные кнопки, видимые всем пользователям.
 MAIN_KEYBOARD: list[list[dict[str, str]]] = [
     [{"text": "📋 Список"}],
-    [{"text": "➕ Добавить URL"}, {"text": "❌ Удалить URL"}],
+    [{"text": "➕ Добавить URL"}],
     [{"text": "❓ Помощь"}],
 ]
 
@@ -104,7 +104,6 @@ BUTTON_ACTIONS: dict[str, str] = {
     "📋 Список": "__await_list__",
 
     "➕ Добавить URL": "__await_add__",
-    "❌ Удалить URL": "__await_remove__",
     "❓ Помощь": "/help",
     # ── вход в админ-панель ──
     "🛠 Админ-панель": "/admin_panel",
@@ -120,27 +119,6 @@ BUTTON_ACTIONS: dict[str, str] = {
 PAGE_SIZE = 9
 
 # ── Inline-клавиатуры ─────────────────────────────────────────────
-
-
-def build_remove_inline_keyboard_paginated(
-    urls: list, page: int, total_pages: int,
-) -> dict[str, Any]:
-    """Paginated inline-клавиатура для удаления: 9 URL + навигация + Отмена."""
-    keyboard = []
-    for row in urls:
-        keyboard.append([{
-            "text": row.name,
-            "callback_data": f"del_{row.id}",
-        }])
-    nav_row = []
-    if page > 0:
-        nav_row.append({"text": "◀", "callback_data": "remove_prev"})
-    nav_row.append({"text": f"[ {page + 1}/{total_pages} ]", "callback_data": "none"})
-    if page < total_pages - 1:
-        nav_row.append({"text": "▶", "callback_data": "remove_next"})
-    nav_row.append({"text": "🔙 Отмена", "callback_data": "cancel_del"})
-    keyboard.append(nav_row)
-    return {"inline_keyboard": keyboard}
 
 
 def build_confirm_delete_keyboard(url_id: int) -> dict[str, Any]:
@@ -182,9 +160,11 @@ def build_list_items_inline_keyboard_paginated(
 
 
 def build_url_detail_keyboard(url_id: int) -> dict[str, Any]:
-    """Inline-клавиатура для деталей URL: Переименовать + Назад."""
+    """Inline-клавиатура для деталей URL: Переименовать, Удалить, Назад."""
     keyboard = [[
         {"text": "✏️ Переименовать", "callback_data": f"rnm_{url_id}"},
+        {"text": "🗑 Удалить", "callback_data": f"del_{url_id}"},
+    ], [
         {"text": "🔙 Назад", "callback_data": "list_back"},
     ]]
     return {"inline_keyboard": keyboard}
