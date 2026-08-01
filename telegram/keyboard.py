@@ -29,7 +29,7 @@ def build_keyboard_markup(
         [{"text": LANGUAGE_BUTTON}],
     ]
     if is_admin:
-        keyboard.append([{"text": button_text("admin_panel", language)}])
+        keyboard.append([{"text": button_text("admin_panel_btn", language)}])
     result: dict[str, Any] = {
         "keyboard": keyboard,
         "resize_keyboard": True,

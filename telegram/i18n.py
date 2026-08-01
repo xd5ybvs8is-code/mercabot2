@@ -9,7 +9,7 @@ TEXTS: dict[str, dict[Language, str]] = {
     "my_urls": {"ru": "📋 Мои URL", "en": "📋 My URLs"},
     "add_url": {"ru": "➕ Добавить URL", "en": "➕ Add URL"},
     "help_button": {"ru": "❓ Помощь", "en": "❓ Help"},
-    "admin_panel": {"ru": "🛠 Админ-панель", "en": "🛠 Admin panel"},
+    "admin_panel_btn": {"ru": "🛠 Админ-панель", "en": "🛠 Admin panel"},
     "status": {"ru": "📊 Статус бота", "en": "📊 Bot status"},
     "reload_urls": {"ru": "🔄 Перезагрузить URL", "en": "🔄 Reload URLs"},
     "pause": {"ru": "⏸️ Пауза", "en": "⏸️ Pause"},
