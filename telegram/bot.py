@@ -11,10 +11,11 @@ from telegram.keyboard import (
     ADMIN_BUTTON_ACTIONS,
     build_remove_inline_keyboard,
     build_confirm_delete_keyboard,
-    build_list_inline_keyboard,
+    build_list_items_inline_keyboard,
+    build_url_detail_keyboard,
     build_rename_inline_keyboard,
 )
-from telegram.messages import format_item_notification, format_url_list
+from telegram.messages import format_item_notification, format_url_detail, format_url_list
 from telegram.sender import MessageSender, Priority
 from models.item import Item
 
@@ -376,26 +377,39 @@ class TelegramNotifier:
                 self._inline_msg_ids[chat_id] = msg_id
                 logger.debug("   📌 Inline msg_id=%s saved for chat=%s", msg_id, chat_id)
 
-    async def _show_list_with_keyboard(self, chat_id: str) -> None:
+    async def _show_list_with_keyboard(self, chat_id: str, edit_msg_id: int | None = None) -> None:
         if self._url_storage is None:
-            await self.send_message(chat_id, "❌ Внутренняя ошибка.")
+            if edit_msg_id:
+                await self._client.edit_message_text(chat_id, edit_msg_id, "❌ Внутренняя ошибка.")
+            else:
+                await self.send_message(chat_id, "❌ Внутренняя ошибка.")
             return
         urls = await self._url_storage.get_user_urls(chat_id)
-        text = await format_url_list(urls, self._url_storage.count_items)
-        markup = build_list_inline_keyboard()
-        payload = {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "reply_markup": markup,
-        }
-        result = await self._client.call_api_json("sendMessage", payload)
-        if result and result.get("ok"):
-            msg = result.get("result", {})
-            msg_id = msg.get("message_id")
-            if msg_id:
-                self._inline_msg_ids[chat_id] = msg_id
-                logger.debug("   📌 Inline msg_id=%s saved for chat=%s", msg_id, chat_id)
+        if not urls:
+            text = "У вас нет отслеживаемых URL.\nДобавьте через кнопку ➕ Добавить URL"
+            markup = {"inline_keyboard": [[{"text": "🔙 Назад", "callback_data": "list_back"}]]}
+        else:
+            text = await format_url_list(urls, self._url_storage.count_items)
+            markup = build_list_items_inline_keyboard(urls)
+
+        if edit_msg_id:
+            await self._client.edit_message_text(
+                chat_id, edit_msg_id, text, reply_markup=markup,
+            )
+        else:
+            payload = {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "reply_markup": markup,
+            }
+            result = await self._client.call_api_json("sendMessage", payload)
+            if result and result.get("ok"):
+                msg = result.get("result", {})
+                msg_id = msg.get("message_id")
+                if msg_id:
+                    self._inline_msg_ids[chat_id] = msg_id
+                    logger.debug("   📌 Inline msg_id=%s saved for chat=%s", msg_id, chat_id)
 
     async def _handle_callback_query(self, callback_query: dict[str, Any]) -> None:
         cb_id = callback_query.get("id", "")
@@ -411,9 +425,35 @@ class TelegramNotifier:
         logger.info("👆 Callback from chat=%s, data='%s'", chat_id, data)
 
         if data == "list_back":
+            await self._show_list_with_keyboard(chat_id, edit_msg_id=msg_id)
+            await self._client.answer_callback_query(cb_id)
+            return
+
+        if data.startswith("info_"):
+            try:
+                url_id = int(data[5:])
+            except ValueError:
+                await self._client.answer_callback_query(cb_id, "Ошибка: некорректный ID")
+                return
+            if self._url_storage is None:
+                await self._client.answer_callback_query(cb_id, "Внутренняя ошибка", show_alert=True)
+                return
+            urls = await self._url_storage.get_user_urls(chat_id)
+            selected = None
+            for r in urls:
+                if r.id == url_id:
+                    selected = r
+                    break
+            if selected is None:
+                await self._client.answer_callback_query(cb_id, "URL не найден", show_alert=True)
+                return
+            detail_text = await format_url_detail(selected, self._url_storage.count_items)
+            markup = build_url_detail_keyboard(url_id)
             if msg_id:
                 await self._client.edit_message_text(
-                    chat_id, msg_id, "Возврат в главное меню.",
+                    chat_id, msg_id,
+                    detail_text,
+                    reply_markup=markup,
                 )
             await self._client.answer_callback_query(cb_id)
             return

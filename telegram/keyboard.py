@@ -150,6 +150,27 @@ def build_list_inline_keyboard() -> dict[str, Any]:
     return {"inline_keyboard": keyboard}
 
 
+def build_list_items_inline_keyboard(urls: list) -> dict[str, Any]:
+    """Inline-клавиатура: каждый URL — кликабельная кнопка, + Назад."""
+    keyboard = []
+    for row in urls:
+        keyboard.append([{
+            "text": f"#{row.id} — {row.name}",
+            "callback_data": f"info_{row.id}",
+        }])
+    keyboard.append([{"text": "🔙 Назад", "callback_data": "list_back"}])
+    return {"inline_keyboard": keyboard}
+
+
+def build_url_detail_keyboard(url_id: int) -> dict[str, Any]:
+    """Inline-клавиатура для деталей URL: Переименовать + Назад."""
+    keyboard = [[
+        {"text": "✏️ Переименовать", "callback_data": f"rnm_{url_id}"},
+        {"text": "🔙 Назад", "callback_data": "list_back"},
+    ]]
+    return {"inline_keyboard": keyboard}
+
+
 def build_rename_inline_keyboard(urls: list) -> dict[str, Any]:
     """Inline-клавиатура со списком URL пользователя для переименования."""
     keyboard = []

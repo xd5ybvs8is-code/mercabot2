@@ -1,3 +1,5 @@
+from urllib.parse import parse_qs, urlparse
+
 from models.item import Item
 from storage.urls import SearchUrlRow
 
@@ -46,6 +48,21 @@ async def format_url_list(urls: list[SearchUrlRow], count_fn) -> str:
         lines.append(f"#{row.id} -- {row.name}")
         lines.append(f"   Items found: {count}")
     return "\n".join(lines)
+
+
+async def format_url_detail(row: SearchUrlRow, count_fn) -> str:
+    parsed = urlparse(row.url)
+    params = parse_qs(parsed.query)
+    added_by = "ключевому слову" if "keyword" in params else "прямой ссылке"
+
+    count = await count_fn(row.id)
+
+    return (
+        f"<b>#{row.id} — {row.name}</b>\n\n"
+        f"🔗 <b>URL парсинга:</b>\n{row.url}\n\n"
+        f"📌 <b>Добавлен по:</b> {added_by}\n"
+        f"📦 <b>Найдено товаров:</b> {count}"
+    )
 
 
 async def format_stats(urls: list[SearchUrlRow], count_fn) -> str:
