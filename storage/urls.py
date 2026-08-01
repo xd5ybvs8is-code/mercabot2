@@ -16,8 +16,16 @@ class SearchUrlRow(NamedTuple):
     added_at: int
 
 
+class PendingNotification(NamedTuple):
+    id: int
+    item_id: str
+    search_url_id: int
+    chat_id: str
+    text: str
+
+
 class UrlStorage:
-    """CRUD operations for search_urls, seen_items, and items tables.
+    """CRUD operations for search_urls, seen_items, items, and outbox tables.
 
     Контекст транзакций: методы БД-записи не делают commit сами —
     их фиксирует DatabaseConnection.transaction(), в который их оборачивает
@@ -77,6 +85,10 @@ class UrlStorage:
                 (url_id, user_chat_id),
             )
             if cursor.rowcount > 0:
+                await conn.execute(
+                    "DELETE FROM notification_outbox WHERE search_url_id = ?",
+                    (url_id,),
+                )
                 logger.info("✅ URL #%s removed successfully", url_id)
             else:
                 logger.warning("⚠️  URL #%s not found or not owned by user %s", url_id, user_chat_id)
@@ -193,6 +205,59 @@ class UrlStorage:
             "INSERT OR IGNORE INTO seen_items (item_id, search_url_id, created_at) VALUES (?, ?, ?)",
             rows,
         )
+
+    # ── notification outbox ───────────────────────────────────────
+
+    async def add_pending_notification(
+        self,
+        search_url_id: int,
+        item_id: str,
+        chat_id: str,
+        text: str,
+    ) -> PendingNotification | None:
+        """Persist a notification before putting it into the in-memory queue.
+
+        Returns the newly-created row, or ``None`` when this item is already
+        pending. The unique key prevents repeated watcher cycles from adding
+        duplicate messages while Telegram is unavailable.
+        """
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "INSERT OR IGNORE INTO notification_outbox "
+                "(item_id, search_url_id, chat_id, text, created_at) VALUES (?, ?, ?, ?, ?)",
+                (item_id, search_url_id, chat_id, text, int(time.time())),
+            )
+            if cursor.rowcount == 0:
+                return None
+            notification_id = cursor.lastrowid
+            return PendingNotification(
+                notification_id, item_id, search_url_id, chat_id, text,
+            )
+
+    async def get_pending_notifications(self) -> list[PendingNotification]:
+        rows = await self.conn.execute_fetchall(
+            "SELECT id, item_id, search_url_id, chat_id, text "
+            "FROM notification_outbox ORDER BY id"
+        )
+        return [PendingNotification(*row) for row in rows]
+
+    async def complete_notification(
+        self,
+        notification_id: int,
+        search_url_id: int,
+        item_id: str,
+    ) -> None:
+        """Atomically acknowledge delivery and mark the item as seen."""
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "INSERT OR IGNORE INTO seen_items (item_id, search_url_id, created_at) "
+                "VALUES (?, ?, ?)",
+                (item_id, search_url_id, int(time.time())),
+            )
+            await conn.execute(
+                "DELETE FROM notification_outbox WHERE id = ? AND item_id = ? AND search_url_id = ?",
+                (notification_id, item_id, search_url_id),
+            )
 
     # ── cleanup ──────────────────────────────────────────────────
 

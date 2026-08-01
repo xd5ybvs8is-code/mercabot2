@@ -1,4 +1,5 @@
 import logging
+from html import escape
 from urllib.parse import quote_plus
 
 from mercari.conditions import parse_search_url, normalize_search_url
@@ -92,7 +93,7 @@ def make_handlers(
             parse_search_url(clean_url)
         except Exception as exc:
             logger.error("   ❌ URL parse failed for user %s: %s", chat_id, exc)
-            return f"Could not parse search URL: {exc}"
+            return f"Could not parse search URL: {escape(str(exc))}"
 
         clean_url = normalize_search_url(clean_url)
         logger.debug("   🔧 Normalized URL: %s", clean_url)
@@ -102,7 +103,7 @@ def make_handlers(
             watcher.force_reload()
             display_name = name or clean_url
             logger.info("   ✅ URL #%s added for user %s (name='%s')", url_id, chat_id, display_name)
-            return f"URL added\nName: {display_name}\n\nFirst check will start on next cycle"
+            return f"URL added\nName: {escape(display_name)}\n\nFirst check will start on next cycle"
         logger.info("   ℹ️  URL already exists for user %s (id=%s)", chat_id, url_id)
         return "URL already exists"
 
@@ -131,7 +132,7 @@ def make_handlers(
         name = new_name.strip()
         if await url_storage.rename(url_id, chat_id, name):
             logger.info("   ✅ URL #%s renamed to '%s' for user %s", url_id, name, chat_id)
-            return f"URL renamed to: {name}"
+            return f"URL renamed to: {escape(name)}"
         logger.warning("   ⚠️  URL #%s not found for user %s", url_id, chat_id)
         return "URL not found"
 

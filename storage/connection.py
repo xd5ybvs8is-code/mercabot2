@@ -46,6 +46,23 @@ CREATE_INDEX_SEEN_ITEMS_SQL = """
 CREATE INDEX IF NOT EXISTS idx_seen_items_url_id ON seen_items(search_url_id);
 """
 
+CREATE_TABLE_NOTIFICATION_OUTBOX_SQL = """
+CREATE TABLE IF NOT EXISTS notification_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL,
+    search_url_id INTEGER NOT NULL,
+    chat_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (item_id, search_url_id)
+);
+"""
+
+CREATE_INDEX_NOTIFICATION_OUTBOX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_notification_outbox_created_at
+ON notification_outbox(created_at);
+"""
+
 # Per-user device_uuid: каждый пользователь бота представляется Mercari
 # как отдельное устройство со своим UUID и своим EC-ключом DPoP.
 # Раньше DEVICE_UUID был один на весь процесс (общая «личность» для всех юзеров).
@@ -89,9 +106,13 @@ class DatabaseConnection:
         await self._conn.execute(CREATE_TABLE_URLS_SQL)
         logger.debug("  • Creating table: seen_items...")
         await self._conn.execute(CREATE_TABLE_SEEN_ITEMS_SQL)
+        logger.debug("  • Creating table: notification_outbox...")
+        await self._conn.execute(CREATE_TABLE_NOTIFICATION_OUTBOX_SQL)
         await self._conn.execute(CREATE_TABLE_USER_DEVICES_SQL)
         logger.debug("  • Creating index: idx_seen_items_url_id...")
         await self._conn.execute(CREATE_INDEX_SEEN_ITEMS_SQL)
+        logger.debug("  • Creating index: idx_notification_outbox_created_at...")
+        await self._conn.execute(CREATE_INDEX_NOTIFICATION_OUTBOX_SQL)
         await self._conn.commit()
         logger.info("=" * 50)
         logger.info("🗄️  DATABASE CONNECTED")

@@ -1,3 +1,4 @@
+from html import escape
 from urllib.parse import parse_qs, urlparse
 
 from models.item import Item
@@ -31,11 +32,11 @@ SHUTDOWN_MESSAGE = (
 
 def format_item_notification(item: Item, search_name: str) -> str:
     return (
-        f"{search_name}\n\n"
+        f"{escape(search_name)}\n\n"
         "New listing\n\n"
-        f"Title:\n{item.title}\n\n"
+        f"Title:\n{escape(item.title)}\n\n"
         f"Price:\n{item.price:,} JPY\n\n"
-        f"Link:\n{item.url}"
+        f"Link:\n{escape(item.url)}"
     )
 
 
@@ -56,8 +57,8 @@ async def format_url_detail(row: SearchUrlRow) -> str:
     added_by = "ключевому слову" if "keyword" in params else "прямой ссылке"
 
     return (
-        f"<b>{row.name}</b>\n\n"
-        f"🔗 <b>URL парсинга:</b>\n{row.url}\n\n"
+        f"<b>{escape(row.name)}</b>\n\n"
+        f"🔗 <b>URL парсинга:</b>\n{escape(row.url)}\n\n"
         f"📌 <b>Добавлен по:</b> {added_by}"
     )
 

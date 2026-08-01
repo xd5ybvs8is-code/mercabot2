@@ -263,7 +263,7 @@ class MercariWatcher:
     ) -> None:
         """Diff against DB seen_items, notify about new ones, record.
 
-        БД-часть (чтение seen → запись items → пометка seen) выполняется
+        БД-часть (чтение seen → запись items) выполняется
         атомарно внутри transaction(): так параллельные корутины в
         asyncio.gather не наступают на общую транзакцию одного Connection.
         Рассылка в Telegram — ВНЕ транзакции, чтобы не держать соединение
@@ -281,21 +281,28 @@ class MercariWatcher:
 
             # Record all current items in items table (for /stats)
             await self._url_storage.insert_items_bulk(url_row.id, current_items)
-            # Mark all current as seen (including existing + new)
-            await self._url_storage.mark_seen_bulk(url_row.id, list(current_ids))
-
-        # Notify only new items — вне транзакции, по уже зафиксированным данным.
-        # send_item только ставит сообщение в очередь MessageSender (не блокирует);
-        # фактическая отправка идёт фоновым pump'ом параллельно с этим циклом, поэтому
-        # уведомления уходят в течение текущего цикла, а не следующего.
+        # During the first cycle after startup notifications are intentionally
+        # suppressed. Those items are safe to mark seen because no delivery is
+        # expected for them.
         new_items = [item for item in current_items if item.id in new_ids]
+        if self._startup:
+            async with self._url_storage.transaction():
+                await self._url_storage.mark_seen_bulk(url_row.id, list(new_ids))
+            logger.info("   🔇 Startup mode — %s new item(s) marked as seen", len(new_items))
+            return
+
+        # Persist each notification before enqueueing it. The sender's success
+        # callback marks seen and removes the outbox row only after Telegram
+        # accepts the message.
         for item in new_items:
             logger.info("New item detected %s", item.id)
-            if self._startup:
-                logger.info("   🔇 Startup mode — skipping notification for %s", item.id)
-            else:
-                await self._telegram.send_item(url_row.user_chat_id, item, url_row.name)
-                logger.info(
-                    "Queued notification for item %s to user %s [%s]",
-                    item.id, url_row.user_chat_id, url_row.name,
-                )
+            await self._telegram.send_item(
+                url_row.user_chat_id,
+                item,
+                url_row.name,
+                search_url_id=url_row.id,
+            )
+            logger.info(
+                "Queued durable notification for item %s to user %s [%s]",
+                item.id, url_row.user_chat_id, url_row.name,
+            )

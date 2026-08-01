@@ -1,4 +1,5 @@
 import asyncio
+from html import escape
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -18,6 +19,7 @@ from telegram.keyboard import (
 from telegram.messages import format_item_notification, format_url_detail, format_url_list
 from telegram.sender import MessageSender, Priority
 from models.item import Item
+from storage.urls import PendingNotification
 
 if TYPE_CHECKING:
     from storage.urls import UrlStorage
@@ -67,6 +69,11 @@ class TelegramNotifier:
     async def start(self) -> None:
         logger.info("⏳ Starting Telegram bot...")
         await self._client.start()
+        if self._url_storage is not None:
+            pending = await self._url_storage.get_pending_notifications()
+            for notification in pending:
+                self._enqueue_pending_notification(notification)
+            logger.info("📦 Restored %s pending notification(s) from outbox", len(pending))
         self._sender.start()
         logger.info("✅ Telegram bot started (long-polling mode)")
 
@@ -108,15 +115,50 @@ class TelegramNotifier:
         )
         return True
 
-    async def send_item(self, chat_id: str, item: Item, search_name: str = "") -> bool:
+    async def send_item(
+        self,
+        chat_id: str,
+        item: Item,
+        search_name: str = "",
+        *,
+        search_url_id: int | None = None,
+    ) -> bool:
+        text = format_item_notification(item, search_name)
+        if self._url_storage is None:
+            self._sender.enqueue(
+                chat_id, text, disable_preview=False, show_keyboard=False,
+                priority=Priority.NORMAL,
+            )
+            return True
+
+        if search_url_id is None:
+            raise ValueError("search_url_id is required for durable item notifications")
+        notification = await self._url_storage.add_pending_notification(
+            search_url_id=search_url_id,
+            item_id=item.id,
+            chat_id=chat_id,
+            text=text,
+        )
+        if notification is not None:
+            self._enqueue_pending_notification(notification)
+        return True
+
+    def _enqueue_pending_notification(self, notification: PendingNotification) -> None:
+        async def acknowledge() -> None:
+            if self._url_storage is None:
+                return
+            await self._url_storage.complete_notification(
+                notification.id, notification.search_url_id, notification.item_id,
+            )
+
         self._sender.enqueue(
-            chat_id,
-            format_item_notification(item, search_name),
+            notification.chat_id,
+            notification.text,
             disable_preview=False,
             show_keyboard=False,
             priority=Priority.NORMAL,
+            on_success=acknowledge,
         )
-        return True
 
     # ── Admin helpers ─────────────────────────────────────────────
 
@@ -252,7 +294,7 @@ class TelegramNotifier:
             await self.send_message(
                 chat_id,
                 "🔗 Отлично! Теперь отправьте URL для этого поиска.\n\n"
-                f"Имя: <b>{name}</b>\n\n"
+                f"Имя: <b>{escape(name)}</b>\n\n"
                 "Пример URL:\n"
                 "https://jp.mercari.com/en/search?category_id=7021",
                 keyboard_kind="cancel",
@@ -288,7 +330,7 @@ class TelegramNotifier:
                 return
             if await self._url_storage.rename(url_id, chat_id, new_name):
                 logger.info("   ✅ URL #%s renamed to '%s' for user %s", url_id, new_name, chat_id)
-                await self.send_message(chat_id, f"✅ URL переименован в: {new_name}")
+                await self.send_message(chat_id, f"✅ URL переименован в: {escape(new_name)}")
             else:
                 logger.warning("   ⚠️  URL #%s not found for user %s", url_id, chat_id)
                 await self.send_message(chat_id, "❌ URL не найден")
@@ -532,12 +574,12 @@ class TelegramNotifier:
             if msg_id:
                 await self._client.edit_message_text(
                     chat_id, msg_id,
-                    f"✅ Выбран URL (<b>{selected.name}</b>).",
+                    f"✅ Выбран URL (<b>{escape(selected.name)}</b>).",
                 )
             await self._client.answer_callback_query(cb_id)
             await self.send_message(
                 chat_id,
-                f"✏️ Введите новое имя для URL (<b>{selected.name}</b>).",
+                f"✏️ Введите новое имя для URL (<b>{escape(selected.name)}</b>).",
                 keyboard_kind="cancel",
                 placeholder="Введите новое имя...",
             )
@@ -567,7 +609,7 @@ class TelegramNotifier:
             markup = build_confirm_delete_keyboard(url_id)
             ok = await self._client.edit_message_text(
                 chat_id, msg_id,
-                f"🗑 Удалить URL <b>{selected.name}</b>?",
+                f"🗑 Удалить URL <b>{escape(selected.name)}</b>?",
                 reply_markup=markup,
             )
             if not ok:
@@ -597,14 +639,14 @@ class TelegramNotifier:
                 self._list_pages[chat_id] = 0
                 await self._client.edit_message_text(
                     chat_id, msg_id,
-                    f"✅ URL <b>{name}</b> удалён.",
+                    f"✅ URL <b>{escape(name)}</b> удалён.",
                     reply_markup={"inline_keyboard": []},
                 )
                 logger.info("   ✅ URL #%s removed via inline keyboard by %s", url_id, chat_id)
             else:
                 await self._client.edit_message_text(
                     chat_id, msg_id,
-                    f"❌ URL <b>{name}</b> не найден.",
+                    f"❌ URL <b>{escape(name)}</b> не найден.",
                 )
             await self._client.answer_callback_query(cb_id)
             return
@@ -649,7 +691,7 @@ class TelegramNotifier:
             logger.warning("   ❌ Unknown command '%s' from user %s", command, chat_id)
             await self.send_message(
                 chat_id,
-                f"❌ Неизвестная команда: {command}\n\n"
+                f"❌ Неизвестная команда: {escape(command)}\n\n"
                 "Используй кнопки внизу или /help для справки.",
             )
             return
@@ -665,6 +707,6 @@ class TelegramNotifier:
         except Exception as exc:
             logger.exception("   ❌ Command handler error for '%s'", command)
             await self.send_message(
-                chat_id, f"❌ Ошибка: {exc}",
+                chat_id, f"❌ Ошибка: {escape(str(exc))}",
                 keyboard_kind=keyboard_kind,
             )

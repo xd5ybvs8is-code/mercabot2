@@ -3,6 +3,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from telegram.client import TelegramClient, TelegramRateLimitError
@@ -52,6 +53,8 @@ class OutgoingMessage:
     placeholder: str | None = field(default=None, compare=False)
     # Счётчик неудачных попыток отправки. После _MAX_ATTEMPTS сообщение дропается.
     attempts: int = field(default=0, compare=False)
+    # Durable notification acknowledgement, called only after Telegram accepts it.
+    on_success: Callable[[], Awaitable[None]] | None = field(default=None, compare=False)
 
 
 class MessageSender:
@@ -135,6 +138,7 @@ class MessageSender:
         priority: int = Priority.NORMAL,
         keyboard_kind: str = "main",
         placeholder: str | None = None,
+        on_success: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """Кладёт сообщение в очередь. Не блокирует.
 
@@ -153,6 +157,7 @@ class MessageSender:
             show_keyboard=show_keyboard,
             keyboard_kind=keyboard_kind,
             placeholder=placeholder,
+            on_success=on_success,
         )
         self._queue.put_nowait(msg)
         logger.debug(
@@ -249,6 +254,7 @@ class MessageSender:
         payload: dict[str, Any] = {
             "chat_id": msg.chat_id,
             "text": msg.text,
+            "parse_mode": "HTML",
             "disable_web_page_preview": msg.disable_preview,
         }
         if msg.show_keyboard:
@@ -299,6 +305,16 @@ class MessageSender:
             # или Telegram отдаёт не-200/не-429.
             msg.attempts += 1
             if msg.attempts > _MAX_ATTEMPTS:
+                if msg.on_success is not None:
+                    # Durable notifications must not be dropped: the outbox
+                    # row remains pending until Telegram accepts the message.
+                    msg.attempts = 0
+                    self._queue.put_nowait(msg)
+                    logger.error(
+                        "❌ Durable msg #%s still unavailable after %s attempts; retrying",
+                        msg.seq, _MAX_ATTEMPTS,
+                    )
+                    return _FAILED
                 self._success_streak = 0
                 logger.error(
                     "💀 Msg #%s DROPPED after %s failed attempts (chat=%s)",
@@ -323,6 +339,16 @@ class MessageSender:
             self._current_rate = min(self._target_rate, self._current_rate + 1)
             self._success_streak = 0
             logger.info("📈 Sender rate recovered ↑ to %s/s", self._current_rate)
+        if msg.on_success is not None:
+            try:
+                await msg.on_success()
+            except Exception:
+                # Telegram already accepted the message. Retrying can produce
+                # a duplicate, but it prevents a DB acknowledgement failure
+                # from leaving the durable outbox stuck forever.
+                self._queue.put_nowait(msg)
+                logger.exception("Failed to acknowledge delivered msg #%s", msg.seq)
+                return _FAILED
         return _OK
 
     def _log_dropped_message(self, msg: OutgoingMessage) -> None:
