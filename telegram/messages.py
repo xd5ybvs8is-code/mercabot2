@@ -49,18 +49,15 @@ async def format_url_list(
     return "Ваши URL:"
 
 
-async def format_url_detail(row: SearchUrlRow, count_fn) -> str:
+async def format_url_detail(row: SearchUrlRow) -> str:
     parsed = urlparse(row.url)
     params = parse_qs(parsed.query)
     added_by = "ключевому слову" if "keyword" in params else "прямой ссылке"
 
-    count = await count_fn(row.id)
-
     return (
         f"<b>{row.name}</b>\n\n"
         f"🔗 <b>URL парсинга:</b>\n{row.url}\n\n"
-        f"📌 <b>Добавлен по:</b> {added_by}\n"
-        f"📦 <b>Найдено товаров:</b> {count}"
+        f"📌 <b>Добавлен по:</b> {added_by}"
     )
 
 

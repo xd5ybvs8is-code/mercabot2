@@ -519,7 +519,7 @@ class TelegramNotifier:
             if selected is None:
                 await self._client.answer_callback_query(cb_id, "URL не найден", show_alert=True)
                 return
-            detail_text = await format_url_detail(selected, self._url_storage.count_items)
+            detail_text = await format_url_detail(selected)
             markup = build_url_detail_keyboard(url_id)
             if msg_id:
                 await self._client.edit_message_text(
