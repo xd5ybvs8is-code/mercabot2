@@ -51,7 +51,6 @@ def build_admin_keyboard_markup(
             [{"text": button_text("pause", language)}, {"text": button_text("resume", language)}],
             [{"text": button_text("broadcast", language)}],
             [{"text": button_text("back", language)}],
-            [{"text": LANGUAGE_BUTTON}],
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
@@ -69,7 +68,6 @@ def build_cancel_keyboard_markup(
     result: dict[str, Any] = {
         "keyboard": [
             [{"text": button_text("back", language)}],
-            [{"text": LANGUAGE_BUTTON}],
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
@@ -88,7 +86,6 @@ def build_add_type_keyboard_markup(
         "keyboard": [
             [{"text": button_text("url_type", language)}, {"text": button_text("keyword_type", language)}],
             [{"text": button_text("back", language)}],
-            [{"text": LANGUAGE_BUTTON}],
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
