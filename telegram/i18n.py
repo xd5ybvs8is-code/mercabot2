@@ -179,6 +179,7 @@ TEXTS: dict[str, dict[Language, str]] = {
     },
     "user_agreement_button": {"ru": "Пользовательское соглашение", "en": "User Agreement"},
     "privacy_policy_button": {"ru": "Политика конфиденциальности", "en": "Privacy Policy"},
+    "support_button": {"ru": "Техподдержка", "en": "Tech Support"},
     "startup": {"ru": "Mercari Watcher запущен\n\nБот начал отслеживать новые объявления.", "en": "Mercari Watcher started\n\nThe bot started tracking new listings."},
     "shutdown": {"ru": "Mercari Watcher остановлен\n\nБот завершил работу.", "en": "Mercari Watcher stopped\n\nThe bot has shut down."},
     "subscription_btn": {"ru": "💎 Купить подписку", "en": "💎 Buy Subscription"},

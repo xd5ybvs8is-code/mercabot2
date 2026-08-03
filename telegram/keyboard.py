@@ -207,9 +207,10 @@ def build_rename_inline_keyboard(urls: list, language: str = "ru") -> dict[str, 
 
 def build_help_inline_keyboard(language: str = "ru") -> dict[str, Any]:
     """Inline-клавиатура для сообщения помощи: кнопка 'Условия использования'."""
-    return {"inline_keyboard": [[
-        {"text": button_text("terms_of_use_button", language), "callback_data": "terms_open"},
-    ]]}
+    return {"inline_keyboard": [
+        [{"text": button_text("terms_of_use_button", language), "callback_data": "terms_open"}],
+        [{"text": button_text("support_button", language), "url": "https://t.me/eeveek"}],
+    ]}
 
 
 def build_terms_inline_keyboard(language: str = "ru") -> dict[str, Any]:
