@@ -608,25 +608,7 @@ class TelegramNotifier:
             await self._client.answer_callback_query(cb_id)
             return
 
-        if data == "sub_7d":
-            language = await self._get_language(chat_id)
-            if msg_id:
-                await self._client.edit_message_text(
-                    chat_id, msg_id,
-                    tr("subscription_selected", language, plan=button_text("sub_7d", language)),
-                    reply_markup={"inline_keyboard": []},
-                )
-            await self._client.answer_callback_query(cb_id)
-            return
-
-        if data == "sub_30d":
-            language = await self._get_language(chat_id)
-            if msg_id:
-                await self._client.edit_message_text(
-                    chat_id, msg_id,
-                    tr("subscription_selected", language, plan=button_text("sub_30d", language)),
-                    reply_markup={"inline_keyboard": []},
-                )
+        if data in ("sub_7d", "sub_30d"):
             await self._client.answer_callback_query(cb_id)
             return
 

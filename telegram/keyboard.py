@@ -223,8 +223,8 @@ def build_terms_inline_keyboard(language: str = "ru") -> dict[str, Any]:
 
 def build_subscription_inline_keyboard(language: str = "ru") -> dict[str, Any]:
     return {"inline_keyboard": [[
-        {"text": button_text("sub_7d", language)},
-        {"text": button_text("sub_30d", language)},
+        {"text": button_text("sub_7d", language), "callback_data": "sub_7d"},
+        {"text": button_text("sub_30d", language), "callback_data": "sub_30d"},
     ]]}
 
 
