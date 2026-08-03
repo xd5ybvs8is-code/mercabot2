@@ -36,8 +36,24 @@ TEXTS: dict[str, dict[Language, str]] = {
         "en": "✅ Language changed to English.",
     },
     "welcome": {
-        "ru": "Добро пожаловать в Mercari Watcher!\n\nВыберите действие в меню ниже.",
-        "en": "Welcome to Mercari Watcher!\n\nChoose an action from the menu below.",
+        "ru": (
+            "👋 Добро пожаловать!\n\n"
+            "Этот бот поможет вам отслеживать новые объявления на Mercari Japan.\n\n\n"
+            "Как только появится новое объявление, соответствующее вашему поиску, вы сразу получите:\n"
+            "• 🏷️ название товара;\n"
+            "• 💴 цену;\n"
+            "• 🔗 ссылку на объявление.\n\n"
+            "Начните с кнопки «➕ Добавить URL» и настройте свой первый поиск."
+        ),
+        "en": (
+            "👋 Welcome!\n\n"
+            "This bot helps you track new listings on Mercari Japan.\n\n\n"
+            "As soon as a new listing matching your search appears, you'll immediately receive:\n"
+            "• 🏷️ item title;\n"
+            "• 💴 price;\n"
+            "• 🔗 listing link.\n\n"
+            "Start with the «➕ Add URL» button and set up your first search."
+        ),
     },
     "cancelled": {"ru": "❌ Действие отменено.", "en": "❌ Action cancelled."},
     "no_permission": {
