@@ -32,3 +32,9 @@ class UserStorage:
                 "updated_at = excluded.updated_at",
                 (chat_id, language, now, now),
             )
+
+    async def remove_user(self, chat_id: str) -> None:
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "DELETE FROM users WHERE chat_id = ?", (chat_id,),
+            )

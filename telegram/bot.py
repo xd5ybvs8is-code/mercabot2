@@ -63,6 +63,7 @@ class TelegramNotifier:
             rate_per_sec=rate_per_sec,
             chat_min_interval=chat_min_interval,
             admin_user_ids=admin_user_ids,
+            on_chat_lost=self._on_chat_lost,
         )
         self._offset: int | None = None
         self._command_handlers: dict[str, CommandHandler] = {}
@@ -93,6 +94,14 @@ class TelegramNotifier:
         await self._sender.stop()
         await self._client.close()
         logger.info("✅ Telegram bot closed")
+
+    async def _on_chat_lost(self, chat_id: str) -> None:
+        """Clean up a chat that Telegram reports as permanently gone."""
+        logger.info("🧹 Chat %s lost — removing from database", chat_id)
+        if self._url_storage is not None:
+            await self._url_storage.deactivate_chat(chat_id)
+        if self._user_storage is not None:
+            await self._user_storage.remove_user(chat_id)
 
     def register_commands(self, handlers: dict[str, CommandHandler]) -> None:
         self._command_handlers.update(handlers)

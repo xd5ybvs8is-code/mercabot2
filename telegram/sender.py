@@ -6,7 +6,7 @@ from pathlib import Path
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from telegram.client import TelegramClient, TelegramRateLimitError
+from telegram.client import TelegramClient, TelegramRateLimitError, TelegramPermanentError
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,8 @@ _DROPPED = 3      # превышен лимит попыток — сообще�
 
 # Сколько неудачных попыток отправки сообщения, прежде чем сдаться.
 _MAX_ATTEMPTS = 20
+# Durable-сообщения тоже не ретраим вечно — после этого порога сдаёмся.
+_MAX_DURABLE_ATTEMPTS = 100
 
 
 class Priority:
@@ -75,11 +77,13 @@ class MessageSender:
         rate_per_sec: int,
         chat_min_interval: float = 1.0,
         admin_user_ids: frozenset[str] = frozenset(),
+        on_chat_lost: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._client = client
         self._target_rate = max(1, int(rate_per_sec))
         self._chat_min_interval = max(0.0, float(chat_min_interval))
         self._admin_user_ids = admin_user_ids
+        self._on_chat_lost = on_chat_lost
         self._queue: asyncio.PriorityQueue[OutgoingMessage] = asyncio.PriorityQueue()
         self._seq = 0
         self._task: asyncio.Task[None] | None = None
@@ -295,6 +299,18 @@ class MessageSender:
 
         try:
             ok = await self._client.call_api("sendMessage", payload)
+        except TelegramPermanentError as exc:
+            logger.error(
+                "💀 Permanent error for chat %s: %s — dropping msg #%s",
+                msg.chat_id, exc.description, msg.seq,
+            )
+            if self._on_chat_lost is not None:
+                try:
+                    await self._on_chat_lost(msg.chat_id)
+                except Exception:
+                    logger.exception("Failed to clean up lost chat %s", msg.chat_id)
+            self._log_dropped_message(msg)
+            return _DROPPED
         except TelegramRateLimitError as exc:
             # Telegram просит притормозить: спим и снижаем скорость вдвое.
             self._success_streak = 0
@@ -315,13 +331,18 @@ class MessageSender:
             msg.attempts += 1
             if msg.attempts > _MAX_ATTEMPTS:
                 if msg.on_success is not None:
-                    # Durable notifications must not be dropped: the outbox
-                    # row remains pending until Telegram accepts the message.
-                    msg.attempts = 0
+                    if msg.attempts > _MAX_DURABLE_ATTEMPTS:
+                        self._success_streak = 0
+                        logger.error(
+                            "💀 Durable msg #%s DROPPED after %s attempts (chat=%s)",
+                            msg.seq, _MAX_DURABLE_ATTEMPTS, msg.chat_id,
+                        )
+                        self._log_dropped_message(msg)
+                        return _DROPPED
                     self._queue.put_nowait(msg)
                     logger.error(
-                        "❌ Durable msg #%s still unavailable after %s attempts; retrying",
-                        msg.seq, _MAX_ATTEMPTS,
+                        "❌ Durable msg #%s still unavailable; retrying (attempt %s/%s)",
+                        msg.seq, msg.attempts, _MAX_DURABLE_ATTEMPTS,
                     )
                     return _FAILED
                 self._success_streak = 0

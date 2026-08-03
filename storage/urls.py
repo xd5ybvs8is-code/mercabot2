@@ -261,6 +261,22 @@ class UrlStorage:
 
     # ── cleanup ──────────────────────────────────────────────────
 
+    async def deactivate_chat(self, chat_id: str) -> None:
+        """Deactivate all URLs and remove pending notifications for a lost chat."""
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "UPDATE search_urls SET active = 0 WHERE user_chat_id = ?",
+                (chat_id,),
+            )
+            await conn.execute(
+                "DELETE FROM notification_outbox WHERE chat_id = ?",
+                (chat_id,),
+            )
+        logger.info(
+            "🧹 Cleaned up lost chat %s: deactivated URLs, removed pending notifications",
+            chat_id,
+        )
+
     async def cleanup_old_items(self, max_age_seconds: int) -> tuple[int, int]:
         """Delete records older than max_age_seconds from items and seen_items.
 

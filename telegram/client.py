@@ -20,6 +20,62 @@ class TelegramRateLimitError(Exception):
         self.retry_after = retry_after
 
 
+class TelegramPermanentError(Exception):
+    """Raised on permanent Telegram errors (chat not found, blocked, etc.).
+
+    These should never be retried — the chat/user is gone forever.
+    """
+
+    def __init__(self, status: int, description: str, error_code: int | None = None) -> None:
+        super().__init__(f"Telegram permanent error {status}: {description}")
+        self.status = status
+        self.description = description
+        self.error_code = error_code
+
+
+_PERMANENT_DESCRIPTIONS: set[str] = {
+    "chat not found",
+    "user_id is invalid",
+    "bot was blocked by the user",
+    "user is deactivated",
+    "group chat was upgraded",
+    "bot was kicked from the group chat",
+    "bot was kicked from the supergroup chat",
+    "bot was kicked from the channel chat",
+    "group chat is deactivated",
+    "group is deactivated",
+    "chat write access is forbidden",
+    "have no rights to send a message",
+}
+
+
+def _is_permanent_error(body: str) -> bool:
+    """Check whether a Telegram error response indicates a permanent failure."""
+    try:
+        data = json.loads(body)
+        desc = data.get("description", "")
+        if isinstance(desc, str):
+            desc_lower = desc.strip().lower()
+            for pattern in _PERMANENT_DESCRIPTIONS:
+                if pattern in desc_lower:
+                    return True
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return False
+
+
+def _parse_error_body(body: str) -> tuple[str, int | None]:
+    """Extract (description, error_code) from a Telegram error JSON."""
+    try:
+        data = json.loads(body)
+        return (
+            data.get("description", body),
+            data.get("error_code"),
+        )
+    except (json.JSONDecodeError, TypeError):
+        return (body, None)
+
+
 def _api_url(token: str, method: str) -> str:
     return TELEGRAM_API_URL.format(token=token, method=method)
 
@@ -80,11 +136,16 @@ class TelegramClient:
                         )
                         raise TelegramRateLimitError(retry_after)
                     body = await response.text()
+                    if _is_permanent_error(body):
+                        desc, code = _parse_error_body(body)
+                        raise TelegramPermanentError(response.status, desc, code)
                     logger.error(
                         "❌ Telegram API error (attempt %s/%s): %s %s",
                         attempt, MAX_RETRIES, response.status, body,
                     )
             except TelegramRateLimitError:
+                raise
+            except TelegramPermanentError:
                 raise
             except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
                 logger.error(
@@ -141,12 +202,17 @@ class TelegramClient:
                         )
                         raise TelegramRateLimitError(retry_after)
                     body = await response.text()
+                    if _is_permanent_error(body):
+                        desc, code = _parse_error_body(body)
+                        raise TelegramPermanentError(response.status, desc, code)
                     logger.error(
                         "❌ Telegram API error (attempt %s/%s): %s %s",
                         attempt, MAX_RETRIES, response.status, body,
                     )
                     return None
             except TelegramRateLimitError:
+                raise
+            except TelegramPermanentError:
                 raise
             except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
                 logger.error(
