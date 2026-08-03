@@ -203,6 +203,22 @@ def build_rename_inline_keyboard(urls: list, language: str = "ru") -> dict[str, 
     return {"inline_keyboard": keyboard}
 
 
+def build_help_inline_keyboard(language: str = "ru") -> dict[str, Any]:
+    """Inline-клавиатура для сообщения помощи: кнопка 'Условия использования'."""
+    return {"inline_keyboard": [[
+        {"text": button_text("terms_of_use_button", language), "callback_data": "terms_open"},
+    ]]}
+
+
+def build_terms_inline_keyboard(language: str = "ru") -> dict[str, Any]:
+    """Inline-клавиатура с условиями использования."""
+    return {"inline_keyboard": [
+        [{"text": button_text("user_agreement_button", language), "url": "https://telegra.ph/Polzovatelskoe-soglashenie-08-03-26"}],
+        [{"text": button_text("privacy_policy_button", language), "url": "https://telegra.ph/Politika-konfidencialnosti-08-03-72"}],
+        [{"text": button_text("back", language), "callback_data": "terms_back"}],
+    ]}
+
+
 # Множество админских действий — для проверки прав в bot.py.
 ADMIN_BUTTON_ACTIONS: frozenset[str] = frozenset(
     {

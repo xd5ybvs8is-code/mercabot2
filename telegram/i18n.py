@@ -156,6 +156,13 @@ TEXTS: dict[str, dict[Language, str]] = {
     "admin_back": {"ru": "Вы вышли из админ-панели.", "en": "You left the admin panel."},
     "broadcast_sent": {"ru": "📢 Сообщение отправлено {count} пользователю(ям).", "en": "📢 Message sent to {count} user(s)."},
     "broadcast_header": {"ru": "📢 <b>Сообщение от администратора</b>\n\n{text}", "en": "📢 <b>Message from the administrator</b>\n\n{text}"},
+    "terms_of_use_button": {"ru": "Условия использования", "en": "Terms of Use"},
+    "terms_of_use_text": {
+        "ru": "Оформляя покупку в нашем боте, вы автоматически принимаете условия использования нашего сервиса, представленные ниже",
+        "en": "By making a purchase in our bot, you automatically accept the terms of use of our service presented below",
+    },
+    "user_agreement_button": {"ru": "Пользовательское соглашение", "en": "User Agreement"},
+    "privacy_policy_button": {"ru": "Политика конфиденциальности", "en": "Privacy Policy"},
     "startup": {"ru": "Mercari Watcher запущен\n\nБот начал отслеживать новые объявления.", "en": "Mercari Watcher started\n\nThe bot started tracking new listings."},
     "shutdown": {"ru": "Mercari Watcher остановлен\n\nБот завершил работу.", "en": "Mercari Watcher stopped\n\nThe bot has shut down."},
 }

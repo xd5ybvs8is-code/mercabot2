@@ -16,6 +16,8 @@ from telegram.keyboard import (
     build_url_detail_keyboard,
     build_rename_inline_keyboard,
     build_language_keyboard,
+    build_help_inline_keyboard,
+    build_terms_inline_keyboard,
     LANGUAGE_BUTTON,
     button_text,
 )
@@ -427,6 +429,11 @@ class TelegramNotifier:
 
         if action is not None:
             logger.info("   → User %s pressed button '%s'", chat_id, text)
+
+            if action == "/help":
+                await self._show_help_inline(chat_id)
+                return
+
             # Внутри админ-панели ответы оставляют её клавиатуру;
             # /admin_back возвращает к основной.
             if action == "/admin_back":
@@ -505,6 +512,38 @@ class TelegramNotifier:
                     self._inline_msg_ids[chat_id] = msg_id
                     logger.debug("   📌 Inline msg_id=%s saved for chat=%s", msg_id, chat_id)
 
+    async def _show_help_inline(self, chat_id: str, edit_msg_id: int | None = None) -> None:
+        language = await self._get_language(chat_id)
+        help_text = tr("help", language)
+        markup = build_help_inline_keyboard(language)
+        if edit_msg_id:
+            await self._client.edit_message_text(
+                chat_id, edit_msg_id, help_text, reply_markup=markup,
+            )
+        else:
+            payload = {
+                "chat_id": chat_id,
+                "text": help_text,
+                "parse_mode": "HTML",
+                "reply_markup": markup,
+            }
+            result = await self._client.call_api_json("sendMessage", payload)
+            if result and result.get("ok"):
+                msg = result.get("result", {})
+                msg_id = msg.get("message_id")
+                if msg_id:
+                    self._inline_msg_ids[chat_id] = msg_id
+                    logger.debug("   📌 Help inline msg_id=%s saved for chat=%s", msg_id, chat_id)
+
+    async def _show_terms_inline(self, chat_id: str, msg_id: int | None) -> None:
+        language = await self._get_language(chat_id)
+        terms_text = tr("terms_of_use_text", language)
+        markup = build_terms_inline_keyboard(language)
+        if msg_id:
+            await self._client.edit_message_text(
+                chat_id, msg_id, terms_text, reply_markup=markup,
+            )
+
     async def _handle_callback_query(self, callback_query: dict[str, Any]) -> None:
         cb_id = callback_query.get("id", "")
         data = callback_query.get("data", "")
@@ -534,6 +573,17 @@ class TelegramNotifier:
 
     async def _dispatch_callback(self, cb_id: str, data: str, chat_id: str, msg_id: int | None) -> None:
         language = await self._get_language(chat_id)
+
+        if data == "terms_open":
+            await self._show_terms_inline(chat_id, msg_id)
+            await self._client.answer_callback_query(cb_id)
+            return
+
+        if data == "terms_back":
+            await self._show_help_inline(chat_id, edit_msg_id=msg_id)
+            await self._client.answer_callback_query(cb_id)
+            return
+
         if data == "change_language":
             await self._show_language_selection(chat_id, edit_msg_id=msg_id)
             await self._client.answer_callback_query(cb_id)
@@ -750,6 +800,10 @@ class TelegramNotifier:
         command = parts[0].lower()
         argument = parts[1].strip() if len(parts) > 1 else ""
         logger.debug("   Parsed command: '%s' with argument: '%s'", command, argument[:50])
+        # Intercept /help to show inline keyboard
+        if command == "/help":
+            await self._show_help_inline(chat_id)
+            return
         # Intercept /list to show inline keyboard
         if command == "/list":
             await self._show_list_with_keyboard(chat_id)
