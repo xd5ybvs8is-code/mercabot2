@@ -23,10 +23,10 @@ def build_keyboard_markup(
     отдельным сообщением при входе в /admin_panel, а не каждой отправкой.
     """
     keyboard = [
+        [{"text": button_text("subscription_btn", language)}],
         [{"text": button_text("my_urls", language)}],
         [{"text": button_text("add_url", language)}],
-        [{"text": button_text("help_button", language)}],
-        [{"text": LANGUAGE_BUTTON}],
+        [{"text": button_text("help_button", language)}, {"text": LANGUAGE_BUTTON}],
     ]
     if is_admin:
         keyboard.append([{"text": button_text("admin_panel_btn", language)}])
@@ -102,9 +102,11 @@ BUTTON_ACTIONS: dict[str, str] = {
     # ── основные ──
     "📋 Мои URL": "__await_list__",
     "➕ Добавить URL": "__await_add__",
+    "💎 Купить подписку": "__await_subscription__",
     "❓ Помощь": "/help",
     "📋 My URLs": "__await_list__",
     "➕ Add URL": "__await_add__",
+    "💎 Buy Subscription": "__await_subscription__",
     "❓ Help": "/help",
     LANGUAGE_BUTTON: "__language__",
     # ── вход в админ-панель ──
@@ -217,6 +219,13 @@ def build_terms_inline_keyboard(language: str = "ru") -> dict[str, Any]:
         [{"text": button_text("privacy_policy_button", language), "url": "https://telegra.ph/Politika-konfidencialnosti-08-03-72"}],
         [{"text": button_text("back", language), "callback_data": "terms_back"}],
     ]}
+
+
+def build_subscription_inline_keyboard(language: str = "ru") -> dict[str, Any]:
+    return {"inline_keyboard": [[
+        {"text": button_text("sub_7d", language), "callback_data": "sub_7d"},
+        {"text": button_text("sub_30d", language), "callback_data": "sub_30d"},
+    ]]}
 
 
 # Множество админских действий — для проверки прав в bot.py.

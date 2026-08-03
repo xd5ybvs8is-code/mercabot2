@@ -18,6 +18,7 @@ from telegram.keyboard import (
     build_language_keyboard,
     build_help_inline_keyboard,
     build_terms_inline_keyboard,
+    build_subscription_inline_keyboard,
     LANGUAGE_BUTTON,
     button_text,
 )
@@ -427,6 +428,11 @@ class TelegramNotifier:
             )
             return
 
+        if action == "__await_subscription__":
+            logger.info("   → User %s pressed 'Subscription' button", chat_id)
+            await self._show_subscription(chat_id)
+            return
+
         if action is not None:
             logger.info("   → User %s pressed button '%s'", chat_id, text)
 
@@ -544,6 +550,24 @@ class TelegramNotifier:
                 chat_id, msg_id, terms_text, reply_markup=markup,
             )
 
+    async def _show_subscription(self, chat_id: str) -> None:
+        language = await self._get_language(chat_id)
+        sub_text = tr("subscription_title", language)
+        markup = build_subscription_inline_keyboard(language)
+        payload = {
+            "chat_id": chat_id,
+            "text": sub_text,
+            "parse_mode": "HTML",
+            "reply_markup": markup,
+        }
+        result = await self._client.call_api_json("sendMessage", payload)
+        if result and result.get("ok"):
+            msg = result.get("result", {})
+            msg_id = msg.get("message_id")
+            if msg_id:
+                self._inline_msg_ids[chat_id] = msg_id
+                logger.debug("   📌 Subscription inline msg_id=%s saved for chat=%s", msg_id, chat_id)
+
     async def _handle_callback_query(self, callback_query: dict[str, Any]) -> None:
         cb_id = callback_query.get("id", "")
         data = callback_query.get("data", "")
@@ -581,6 +605,28 @@ class TelegramNotifier:
 
         if data == "terms_back":
             await self._show_help_inline(chat_id, edit_msg_id=msg_id)
+            await self._client.answer_callback_query(cb_id)
+            return
+
+        if data == "sub_7d":
+            language = await self._get_language(chat_id)
+            if msg_id:
+                await self._client.edit_message_text(
+                    chat_id, msg_id,
+                    tr("subscription_selected", language, plan=button_text("sub_7d", language)),
+                    reply_markup={"inline_keyboard": []},
+                )
+            await self._client.answer_callback_query(cb_id)
+            return
+
+        if data == "sub_30d":
+            language = await self._get_language(chat_id)
+            if msg_id:
+                await self._client.edit_message_text(
+                    chat_id, msg_id,
+                    tr("subscription_selected", language, plan=button_text("sub_30d", language)),
+                    reply_markup={"inline_keyboard": []},
+                )
             await self._client.answer_callback_query(cb_id)
             return
 
