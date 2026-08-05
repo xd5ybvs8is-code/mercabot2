@@ -691,12 +691,68 @@ class TelegramNotifier:
                         self._inline_msg_ids[chat_id] = msg_id
                 return
             elif sub is not None and sub.status == "pending":
-                status_text = (
-                    f"{tr('subscription_status_title', language)}\n\n"
-                    f"{tr('subscription_status_pending', language)}"
-                )
-                await self.send_message(chat_id, status_text)
-                return
+                if self._crypto_client is not None and sub.invoice_id is not None:
+                    from datetime import datetime as _dt
+                    invoices = await self._crypto_client.get_invoices([sub.invoice_id])
+                    if invoices:
+                        inv = invoices[0]
+                        if inv.status == "paid":
+                            plan_days = 7 if sub.plan == "7d" else 30
+                            if sub.plan not in ("7d", "30d"):
+                                plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+                            expires_at = int(time.time()) + plan_days * 86400
+                            await self._subs_storage.activate(
+                                user_id=chat_id,
+                                plan=sub.plan,
+                                invoice_id=sub.invoice_id,
+                                payment_hash=inv.hash,
+                                paid_amount=inv.amount,
+                                paid_asset=inv.asset,
+                                expires_at=expires_at,
+                            )
+                            plan_label = "7 дней" if sub.plan == "7d" else f"{sub.plan} дней"
+                            if language == "en":
+                                plan_label = "7 days" if sub.plan == "7d" else f"{sub.plan} days"
+                            expires_str = _dt.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
+                            status_text = tr("invoice_paid_now", language, plan=plan_label, expires=expires_str)
+                            await self.send_message(chat_id, status_text)
+                            return
+                        else:
+                            now = int(time.time())
+                            if sub.created_at and (now - sub.created_at) > 30 * 60:
+                                await self._subs_storage.cancel_pending(chat_id)
+                            else:
+                                markup = build_invoice_keyboard(inv.pay_url, sub.invoice_id, language)
+                                status_text = (
+                                    f"{tr('subscription_status_title', language)}\n\n"
+                                    f"{tr('subscription_status_pending', language)}"
+                                )
+                                payload = {
+                                    "chat_id": chat_id,
+                                    "text": status_text,
+                                    "parse_mode": "HTML",
+                                    "reply_markup": markup,
+                                }
+                                await self._client.call_api_json("sendMessage", payload)
+                                return
+                    else:
+                        now = int(time.time())
+                        if sub.created_at and (now - sub.created_at) > 30 * 60:
+                            await self._subs_storage.cancel_pending(chat_id)
+                        else:
+                            status_text = (
+                                f"{tr('subscription_status_title', language)}\n\n"
+                                f"{tr('subscription_status_pending', language)}"
+                            )
+                            await self.send_message(chat_id, status_text)
+                            return
+                else:
+                    status_text = (
+                        f"{tr('subscription_status_title', language)}\n\n"
+                        f"{tr('subscription_status_pending', language)}"
+                    )
+                    await self.send_message(chat_id, status_text)
+                    return
 
         sub_text = tr("subscription_title", language)
         markup = build_subscription_inline_keyboard(language)
