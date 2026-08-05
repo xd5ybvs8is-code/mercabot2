@@ -20,6 +20,7 @@ from telegram.keyboard import (
     build_help_inline_keyboard,
     build_terms_inline_keyboard,
     build_subscription_inline_keyboard,
+    build_trial_keyboard,
     LANGUAGE_BUTTON,
     button_text,
 )
@@ -311,6 +312,12 @@ class TelegramNotifier:
                         chat_id, reactivated,
                     )
             await self.send_message(chat_id, tr("welcome", language))
+            if (
+                self._subs_storage is not None
+                and not await self._subs_storage.is_subscribed(chat_id)
+                and not await self._subs_storage.has_used_trial(chat_id)
+            ):
+                await self._send_trial_offer(chat_id)
             return
 
         # ── Cancel active action ────────────────────────────────
@@ -584,8 +591,12 @@ class TelegramNotifier:
                 from datetime import datetime
                 expires_str = datetime.fromtimestamp(sub.expires_at).strftime("%d.%m.%Y %H:%M")
                 plan_label = "7 дней" if sub.plan == "7d" else f"{sub.plan} дней"
+                if sub.plan == "trial":
+                    plan_label = tr("trial_plan_label", "ru")
                 if language == "en":
                     plan_label = "7 days" if sub.plan == "7d" else f"{sub.plan} days"
+                    if sub.plan == "trial":
+                        plan_label = tr("trial_plan_label", "en")
                 status_text = (
                     f"{tr('subscription_status_title', language)}\n\n"
                     f"{tr('subscription_status_active', language, expires=expires_str, plan=plan_label)}\n\n"
@@ -628,6 +639,55 @@ class TelegramNotifier:
             if msg_id:
                 self._inline_msg_ids[chat_id] = msg_id
                 logger.debug("   📌 Subscription inline msg_id=%s saved for chat=%s", msg_id, chat_id)
+
+    async def _send_trial_offer(self, chat_id: str) -> None:
+        language = await self._get_language(chat_id)
+        markup = build_trial_keyboard(language)
+        payload = {
+            "chat_id": chat_id,
+            "text": tr("trial_prompt", language),
+            "parse_mode": "HTML",
+            "reply_markup": markup,
+        }
+        await self._client.call_api_json("sendMessage", payload)
+
+    async def _handle_trial_activation(
+        self, cb_id: str, chat_id: str, msg_id: int | None, language: str,
+    ) -> None:
+        if self._subs_storage is None:
+            await self._client.answer_callback_query(
+                cb_id, tr("internal_error", language), show_alert=True,
+            )
+            return
+
+        if await self._subs_storage.has_used_trial(chat_id):
+            await self._client.answer_callback_query(
+                cb_id, tr("trial_already_used", language), show_alert=True,
+            )
+            return
+
+        expires_at = int(time.time()) + 12 * 3600
+        await self._subs_storage.activate_trial(chat_id, expires_at)
+        await self._client.answer_callback_query(cb_id)
+
+        if msg_id:
+            from datetime import datetime
+            expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
+            success_text = (
+                f"{tr('trial_activated', language)}\n\n"
+                f"⏰ До: {expires_str}"
+            )
+            await self._client.edit_message_text(
+                chat_id, msg_id, success_text, parse_mode="HTML",
+            )
+        else:
+            await self.send_message(chat_id, tr("trial_activated", language))
+
+        await self.send_message(
+            chat_id,
+            tr("welcome", language),
+            keyboard_kind="main",
+        )
 
     async def _handle_subscription_purchase(
         self, cb_id: str, plan: str, chat_id: str, language: str,
@@ -719,6 +779,10 @@ class TelegramNotifier:
 
         if data in ("sub_7d", "sub_30d"):
             await self._handle_subscription_purchase(cb_id, data, chat_id, language)
+            return
+
+        if data == "trial_activate":
+            await self._handle_trial_activation(cb_id, chat_id, msg_id, language)
             return
 
         if data == "change_language":

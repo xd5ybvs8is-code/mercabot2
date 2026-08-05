@@ -42,8 +42,7 @@ TEXTS: dict[str, dict[Language, str]] = {
             "Как только появится новое объявление, соответствующее вашему поиску, вы сразу получите:\n"
             "• 🏷️ название товара;\n"
             "• 💴 цену;\n"
-            "• 🔗 ссылку на объявление.\n\n"
-            "Начните с кнопки «➕ Добавить URL» и настройте свой первый поиск."
+            "• 🔗 ссылку на объявление."
         ),
         "en": (
             "👋 Welcome!\n\n"
@@ -51,8 +50,7 @@ TEXTS: dict[str, dict[Language, str]] = {
             "As soon as a new listing matching your search appears, you'll immediately receive:\n"
             "• 🏷️ item title;\n"
             "• 💴 price;\n"
-            "• 🔗 listing link.\n\n"
-            "Start with the «➕ Add URL» button and set up your first search."
+            "• 🔗 listing link."
         ),
     },
     "cancelled": {"ru": "❌ Действие отменено.", "en": "❌ Action cancelled."},
@@ -221,6 +219,26 @@ TEXTS: dict[str, dict[Language, str]] = {
     "subscription_extend_btn": {
         "ru": "💎 Продлить подписку",
         "en": "💎 Extend Subscription",
+    },
+    "trial_button": {
+        "ru": "🎁 Пробный доступ (12 часов)",
+        "en": "🎁 Trial Access (12 hours)",
+    },
+    "trial_prompt": {
+        "ru": "🎁 Вы можете получить <b>пробный доступ на 12 часов</b> бесплатно!\n\nПробный доступ даётся только <b>один раз</b>.",
+        "en": "🎁 You can get a <b>12-hour trial access</b> for free!\n\nTrial access is available only <b>once</b>.",
+    },
+    "trial_activated": {
+        "ru": "✅ <b>Пробный доступ активирован на 12 часов!</b>\n\nТеперь вы можете добавлять URL и получать уведомления о новых объявлениях.\n\nПодписка истечёт автоматически.",
+        "en": "✅ <b>Trial access activated for 12 hours!</b>\n\nNow you can add URLs and receive notifications about new listings.\n\nThe subscription will expire automatically.",
+    },
+    "trial_already_used": {
+        "ru": "❌ Вы уже использовали пробный доступ.\n\nПриобретите подписку для продолжения.",
+        "en": "❌ You have already used your trial access.\n\nPurchase a subscription to continue.",
+    },
+    "trial_plan_label": {
+        "ru": "Пробный (12 часов)",
+        "en": "Trial (12 hours)",
     },
 }
 

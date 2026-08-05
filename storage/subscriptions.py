@@ -133,6 +133,34 @@ class SubscriptionStorage:
     async def is_subscribed(self, user_id: str) -> bool:
         return await self.get_active(user_id) is not None
 
+    async def has_used_trial(self, user_id: str) -> bool:
+        cursor = await self._db.conn.execute(
+            "SELECT 1 FROM trial_usages WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        return row is not None
+
+    async def activate_trial(self, user_id: str, expires_at: int) -> None:
+        now = int(time.time())
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "INSERT OR IGNORE INTO trial_usages (user_id, used_at) VALUES (?, ?)",
+                (user_id, now),
+            )
+            await conn.execute(
+                "INSERT INTO subscriptions (user_id, plan, status, subscribed_at, expires_at, created_at, updated_at) "
+                "VALUES (?, 'trial', 'active', ?, ?, ?, ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET "
+                "  plan = 'trial',"
+                "  status = 'active',"
+                "  subscribed_at = excluded.subscribed_at,"
+                "  expires_at = excluded.expires_at,"
+                "  updated_at = excluded.updated_at",
+                (user_id, now, expires_at, now, now),
+            )
+        logger.info("🎁 Trial activated for user %s (expires=%s)", user_id, expires_at)
+
     @staticmethod
     async def _row_to_subscription(row: Any) -> SubscriptionRow | None:
         if row is None:

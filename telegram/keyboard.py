@@ -233,6 +233,12 @@ def build_subscription_inline_keyboard(language: str = "ru") -> dict[str, Any]:
     ]]}
 
 
+def build_trial_keyboard(language: str = "ru") -> dict[str, Any]:
+    return {"inline_keyboard": [[
+        {"text": button_text("trial_button", language), "callback_data": "trial_activate"},
+    ]]} 
+
+
 # Множество админских действий — для проверки прав в bot.py.
 ADMIN_BUTTON_ACTIONS: frozenset[str] = frozenset(
     {
