@@ -239,7 +239,7 @@ async def main() -> None:
         subs_storage=subs_storage,
         crypto_client=crypto_client,
     )
-    watcher = MercariWatcher(settings, url_storage, telegram, client, devices, subs_storage)
+    watcher = MercariWatcher(settings, url_storage, telegram, client, devices, subs_storage, settings.admin_user_ids)
 
     handlers = make_handlers(url_storage, watcher, telegram, settings.admin_user_ids, subs_storage)
     telegram.register_commands(handlers)

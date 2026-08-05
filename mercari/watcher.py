@@ -24,6 +24,7 @@ class MercariWatcher:
         client: MercariClient,
         devices: DeviceRegistry,
         subs_storage: SubscriptionStorage | None = None,
+        admin_user_ids: frozenset[str] = frozenset(),
     ) -> None:
         self._settings = settings
         self._url_storage = url_storage
@@ -31,6 +32,7 @@ class MercariWatcher:
         self._client = client
         self._devices = devices
         self._subs_storage = subs_storage
+        self._admin_user_ids = admin_user_ids
         self._stop = False
         self._force_reload = False
         # Приостановка watcher'а администратором: цикл остаётся жив,
@@ -303,13 +305,14 @@ class MercariWatcher:
             return
 
         if self._subs_storage is not None and not await self._subs_storage.is_subscribed(url_row.user_chat_id):
-            async with self._url_storage.transaction():
-                await self._url_storage.mark_seen_bulk(url_row.id, list(new_ids))
-            logger.info(
-                "   🚫 User %s has no active subscription — %s new item(s) silently skipped",
-                url_row.user_chat_id, len(new_items),
-            )
-            return
+            if url_row.user_chat_id not in self._admin_user_ids and not await self._subs_storage.is_whitelisted(url_row.user_chat_id):
+                async with self._url_storage.transaction():
+                    await self._url_storage.mark_seen_bulk(url_row.id, list(new_ids))
+                logger.info(
+                    "   🚫 User %s has no active subscription — %s new item(s) silently skipped",
+                    url_row.user_chat_id, len(new_items),
+                )
+                return
 
         # Persist each notification before enqueueing it. The sender's success
         # callback marks seen and removes the outbox row only after Telegram

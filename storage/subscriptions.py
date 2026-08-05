@@ -186,6 +186,46 @@ class SubscriptionStorage:
             )
         logger.info("🎁 Trial activated for user %s (expires=%s)", user_id, expires_at)
 
+    async def whitelist_add(self, user_id: str, granted_by: str) -> bool:
+        now = int(time.time())
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "INSERT OR IGNORE INTO whitelist (user_id, granted_by, granted_at) VALUES (?, ?, ?)",
+                (user_id, granted_by, now),
+            )
+            added = cursor.rowcount > 0
+        if added:
+            logger.info("👤 Whitelisted user %s (granted by %s)", user_id, granted_by)
+        else:
+            logger.info("👤 User %s already whitelisted", user_id)
+        return added
+
+    async def whitelist_remove(self, user_id: str) -> bool:
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "DELETE FROM whitelist WHERE user_id = ?",
+                (user_id,),
+            )
+            removed = cursor.rowcount > 0
+        if removed:
+            logger.info("👤 Removed user %s from whitelist", user_id)
+        return removed
+
+    async def whitelist_list(self) -> list[tuple[str, str, int]]:
+        cursor = await self._db.conn.execute(
+            "SELECT user_id, granted_by, granted_at FROM whitelist ORDER BY granted_at DESC",
+        )
+        rows = await cursor.fetchall()
+        return [(r["user_id"], r["granted_by"], r["granted_at"]) for r in rows]
+
+    async def is_whitelisted(self, user_id: str) -> bool:
+        cursor = await self._db.conn.execute(
+            "SELECT 1 FROM whitelist WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        return row is not None
+
     @staticmethod
     async def _row_to_subscription(row: Any) -> SubscriptionRow | None:
         if row is None:

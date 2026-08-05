@@ -272,6 +272,54 @@ TEXTS: dict[str, dict[Language, str]] = {
         "ru": "✅ Оплата подтверждена!\n\n📦 {plan}\n⏰ До: {expires}",
         "en": "✅ Payment confirmed!\n\n📦 {plan}\n⏰ Until: {expires}",
     },
+    "whitelist": {"ru": "👥 Управление доступом", "en": "👥 Manage Access"},
+    "whitelist_grant": {"ru": "➕ Выдать доступ", "en": "➕ Grant Access"},
+    "whitelist_revoke": {"ru": "➖ Забрать доступ", "en": "➖ Revoke Access"},
+    "whitelist_list": {"ru": "📋 Список доступа", "en": "📋 Access List"},
+    "whitelist_prompt": {
+        "ru": "👥 <b>Управление доступом</b>\n\nВыберите действие:",
+        "en": "👥 <b>Manage Access</b>\n\nChoose an action:",
+    },
+    "whitelist_grant_prompt": {
+        "ru": "➕ <b>Выдать доступ</b>\n\nОтправьте Telegram user_id пользователя, которому нужно выдать бессрочный доступ.",
+        "en": "➕ <b>Grant Access</b>\n\nSend the Telegram user_id of the user to grant unlimited access to.",
+    },
+    "whitelist_revoke_prompt": {
+        "ru": "➖ <b>Забрать доступ</b>\n\nОтправьте Telegram user_id пользователя, у которого нужно забрать доступ.",
+        "en": "➖ <b>Revoke Access</b>\n\nSend the Telegram user_id of the user whose access should be revoked.",
+    },
+    "whitelist_granted": {
+        "ru": "✅ Доступ выдан пользователю <code>{user_id}</code>.",
+        "en": "✅ Access granted to user <code>{user_id}</code>.",
+    },
+    "whitelist_already_granted": {
+        "ru": "⚠️ Пользователь <code>{user_id}</code> уже имеет доступ.",
+        "en": "⚠️ User <code>{user_id}</code> already has access.",
+    },
+    "whitelist_revoked": {
+        "ru": "✅ Доступ у пользователя <code>{user_id}</code> отозван.",
+        "en": "✅ Access revoked for user <code>{user_id}</code>.",
+    },
+    "whitelist_not_found": {
+        "ru": "⚠️ Пользователь <code>{user_id}</code> не найден в списке доступа.",
+        "en": "⚠️ User <code>{user_id}</code> not found in the access list.",
+    },
+    "whitelist_list_title": {
+        "ru": "📋 <b>Пользователи с доступом</b>\n\n",
+        "en": "📋 <b>Users with access</b>\n\n",
+    },
+    "whitelist_list_row": {
+        "ru": "• <code>{user_id}</code> — выдан {granted_at} (админ: <code>{granted_by}</code>)\n",
+        "en": "• <code>{user_id}</code> — granted {granted_at} (by: <code>{granted_by}</code>)\n",
+    },
+    "whitelist_list_empty": {
+        "ru": "Список пуст.",
+        "en": "The list is empty.",
+    },
+    "whitelist_placeholder": {
+        "ru": "Введите Telegram user_id...",
+        "en": "Enter Telegram user_id...",
+    },
 }
 
 

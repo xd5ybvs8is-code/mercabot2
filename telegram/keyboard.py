@@ -52,6 +52,7 @@ def build_admin_keyboard_markup(
             [{"text": button_text("status", language)}, {"text": button_text("reload_urls", language)}],
             [{"text": button_text("pause", language)}, {"text": button_text("resume", language)}],
             [{"text": button_text("broadcast", language)}],
+            [{"text": button_text("whitelist", language)}],
             [{"text": button_text("back", language)}],
         ],
         "resize_keyboard": True,
@@ -69,6 +70,26 @@ def build_cancel_keyboard_markup(
     """Build cancel-only reply keyboard markup."""
     result: dict[str, Any] = {
         "keyboard": [
+            [{"text": button_text("back", language)}],
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False,
+    }
+    if placeholder:
+        result["input_field_placeholder"] = placeholder
+    return result
+
+
+def build_admin_whitelist_keyboard_markup(
+    language: str = "ru",
+    placeholder: str | None = None,
+) -> dict[str, Any]:
+    """Build admin whitelist sub-panel reply keyboard markup."""
+    result: dict[str, Any] = {
+        "keyboard": [
+            [{"text": button_text("whitelist_grant", language)}],
+            [{"text": button_text("whitelist_revoke", language)}],
+            [{"text": button_text("whitelist_list", language)}],
             [{"text": button_text("back", language)}],
         ],
         "resize_keyboard": True,
@@ -129,6 +150,15 @@ BUTTON_ACTIONS: dict[str, str] = {
     "▶️ Resume": "/admin_resume",
     "📢 Broadcast to all": "__await_broadcast__",
     "🔙 Back": "/admin_back",
+    # ── управление whitelist ──
+    "👥 Управление доступом": "/admin_whitelist",
+    "👥 Manage Access": "/admin_whitelist",
+    "➕ Выдать доступ": "__await_whitelist_grant__",
+    "➕ Grant Access": "__await_whitelist_grant__",
+    "➖ Забрать доступ": "__await_whitelist_revoke__",
+    "➖ Revoke Access": "__await_whitelist_revoke__",
+    "📋 Список доступа": "/admin_whitelist_list",
+    "📋 Access List": "/admin_whitelist_list",
 }
 
 PAGE_SIZE = 9
@@ -257,5 +287,9 @@ ADMIN_BUTTON_ACTIONS: frozenset[str] = frozenset(
         "/admin_resume",
         "/admin_back",
         "__await_broadcast__",
+        "/admin_whitelist",
+        "/admin_whitelist_list",
+        "__await_whitelist_grant__",
+        "__await_whitelist_revoke__",
     }
 )

@@ -363,6 +363,28 @@ class TelegramNotifier:
             await self._run_handler("/admin_broadcast", text, chat_id, user_id, keyboard_kind="admin")
             return
 
+        if state and state.get("phase") == "whitelist_grant":
+            if not self._is_admin(user_id):
+                logger.warning("⛔ Non-admin user %s in whitelist_grant state — ignoring", chat_id)
+                del self._awaiting[chat_id]
+                await self.send_message(chat_id, tr("no_permission", language))
+                return
+            del self._awaiting[chat_id]
+            logger.info("   → Admin %s granting access to user '%s'", chat_id, text)
+            await self._run_handler("/admin_whitelist_grant", text, chat_id, user_id, keyboard_kind="admin_whitelist")
+            return
+
+        if state and state.get("phase") == "whitelist_revoke":
+            if not self._is_admin(user_id):
+                logger.warning("⛔ Non-admin user %s in whitelist_revoke state — ignoring", chat_id)
+                del self._awaiting[chat_id]
+                await self.send_message(chat_id, tr("no_permission", language))
+                return
+            del self._awaiting[chat_id]
+            logger.info("   → Admin %s revoking access from user '%s'", chat_id, text)
+            await self._run_handler("/admin_whitelist_revoke", text, chat_id, user_id, keyboard_kind="admin_whitelist")
+            return
+
         if state and state.get("phase") == "add_type":
             # Пользователь выбрал тип поиска на reply‑кнопках
             if text in {button_text("url_type", language), "🔗 URL"}:
@@ -479,6 +501,28 @@ class TelegramNotifier:
             )
             return
 
+        if action == "__await_whitelist_grant__":
+            logger.info("   → Admin %s pressed 'Grant Access' button", chat_id)
+            self._awaiting[chat_id] = {"phase": "whitelist_grant"}
+            await self.send_message(
+                chat_id,
+                tr("whitelist_grant_prompt", language),
+                keyboard_kind="admin_whitelist",
+                placeholder=tr("whitelist_placeholder", language),
+            )
+            return
+
+        if action == "__await_whitelist_revoke__":
+            logger.info("   → Admin %s pressed 'Revoke Access' button", chat_id)
+            self._awaiting[chat_id] = {"phase": "whitelist_revoke"}
+            await self.send_message(
+                chat_id,
+                tr("whitelist_revoke_prompt", language),
+                keyboard_kind="admin_whitelist",
+                placeholder=tr("whitelist_placeholder", language),
+            )
+            return
+
         if action == "__await_subscription__":
             logger.info("   → User %s pressed 'Subscription' button", chat_id)
             await self._show_subscription(chat_id)
@@ -495,6 +539,8 @@ class TelegramNotifier:
             # /admin_back возвращает к основной.
             if action == "/admin_back":
                 keyboard_kind = "main"
+            elif action.startswith("/admin_whitelist"):
+                keyboard_kind = "admin_whitelist"
             elif action.startswith("/admin_"):
                 keyboard_kind = "admin"
             else:
@@ -823,6 +869,10 @@ class TelegramNotifier:
     async def is_subscribed(self, chat_id: str) -> bool:
         if self._subs_storage is None:
             return True
+        if chat_id in self._admin_user_ids:
+            return True
+        if await self._subs_storage.is_whitelisted(chat_id):
+            return True
         return await self._subs_storage.is_subscribed(chat_id)
 
     async def _handle_callback_query(self, callback_query: dict[str, Any]) -> None:
@@ -1124,6 +1174,8 @@ class TelegramNotifier:
         # вернёт приглашение ввести текст.
         if command == "/admin_back":
             keyboard_kind = "main"
+        elif command.startswith("/admin_whitelist"):
+            keyboard_kind = "admin_whitelist"
         elif command.startswith("/admin_"):
             keyboard_kind = "admin"
         else:

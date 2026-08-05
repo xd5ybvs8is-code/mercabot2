@@ -1,6 +1,7 @@
 import logging
 from html import escape
 from urllib.parse import quote_plus
+from datetime import datetime
 
 from mercari.conditions import parse_search_url, normalize_search_url
 from storage.urls import UrlStorage
@@ -13,6 +14,7 @@ from telegram.messages import (
     format_help,
     format_url_list,
     format_admin_status,
+    format_whitelist_list,
 )
 from telegram.i18n import text
 
@@ -47,9 +49,13 @@ def make_handlers(
     def _is_admin(user_id: str) -> bool:
         return user_id in admin_user_ids
 
-    async def _check_subscription(chat_id: str, language: str) -> str | None:
-        """Returns None if subscribed, or an error message if not."""
+    async def _check_subscription(chat_id: str, user_id: str, language: str) -> str | None:
+        """Returns None if access allowed, or an error message if not."""
         if subs_storage is None:
+            return None
+        if _is_admin(user_id):
+            return None
+        if await subs_storage.is_whitelisted(chat_id):
             return None
         if not await subs_storage.is_subscribed(chat_id):
             return text("no_subscription", language)
@@ -64,7 +70,7 @@ def make_handlers(
     async def cmd_add(url: str, chat_id: str, _user_id: str, language: str) -> str:
         logger.info("💬 /add from user %s: '%s'", chat_id, url[:100])
 
-        err = await _check_subscription(chat_id, language)
+        err = await _check_subscription(chat_id, _user_id, language)
         if err:
             return err
 
@@ -113,7 +119,7 @@ def make_handlers(
     async def cmd_remove(arg: str, chat_id: str, _user_id: str, language: str) -> str:
         logger.info("💬 /remove from user %s: '%s'", chat_id, arg)
 
-        err = await _check_subscription(chat_id, language)
+        err = await _check_subscription(chat_id, _user_id, language)
         if err:
             return err
 
@@ -130,7 +136,7 @@ def make_handlers(
     async def cmd_rename(arg: str, chat_id: str, _user_id: str, language: str) -> str:
         logger.info("💬 /rename from user %s: '%s'", chat_id, arg[:80])
 
-        err = await _check_subscription(chat_id, language)
+        err = await _check_subscription(chat_id, _user_id, language)
         if err:
             return err
 
@@ -253,6 +259,61 @@ def make_handlers(
         logger.info("   ✅ Broadcast delivered to %s users", sent)
         return text("broadcast_sent", language, count=sent)
 
+    async def cmd_admin_whitelist(_arg: str, chat_id: str, user_id: str, language: str) -> str:
+        if not _is_admin(user_id):
+            logger.warning("⛔ Non-admin user %s tried /admin_whitelist", chat_id)
+            return text("no_permission", language)
+        logger.info("👥 Admin whitelist panel opened by user %s", chat_id)
+        return text("whitelist_prompt", language)
+
+    async def cmd_admin_whitelist_grant(target_user_id: str, chat_id: str, user_id: str, language: str) -> str:
+        if not _is_admin(user_id):
+            logger.warning("⛔ Non-admin user %s tried /admin_whitelist_grant", chat_id)
+            return text("no_permission", language)
+        if not target_user_id or not target_user_id.strip():
+            return text("whitelist_grant_prompt", language)
+        target = target_user_id.strip()
+        try:
+            int(target)
+        except ValueError:
+            return text("whitelist_grant_prompt", language)
+        if subs_storage is None:
+            return text("internal_error", language)
+        added = await subs_storage.whitelist_add(target, user_id)
+        if added:
+            logger.info("👤 Admin %s granted access to user %s", user_id, target)
+            return text("whitelist_granted", language, user_id=target)
+        return text("whitelist_already_granted", language, user_id=target)
+
+    async def cmd_admin_whitelist_revoke(target_user_id: str, chat_id: str, user_id: str, language: str) -> str:
+        if not _is_admin(user_id):
+            logger.warning("⛔ Non-admin user %s tried /admin_whitelist_revoke", chat_id)
+            return text("no_permission", language)
+        if not target_user_id or not target_user_id.strip():
+            return text("whitelist_revoke_prompt", language)
+        target = target_user_id.strip()
+        try:
+            int(target)
+        except ValueError:
+            return text("whitelist_revoke_prompt", language)
+        if subs_storage is None:
+            return text("internal_error", language)
+        removed = await subs_storage.whitelist_remove(target)
+        if removed:
+            logger.info("👤 Admin %s revoked access from user %s", user_id, target)
+            return text("whitelist_revoked", language, user_id=target)
+        return text("whitelist_not_found", language, user_id=target)
+
+    async def cmd_admin_whitelist_list(_arg: str, chat_id: str, user_id: str, language: str) -> str:
+        if not _is_admin(user_id):
+            logger.warning("⛔ Non-admin user %s tried /admin_whitelist_list", chat_id)
+            return text("no_permission", language)
+        if subs_storage is None:
+            return text("internal_error", language)
+        entries = await subs_storage.whitelist_list()
+        logger.info("📋 Admin %s requested whitelist (%s entries)", chat_id, len(entries))
+        return format_whitelist_list(entries, language)
+
     return {
         # ── пользовательские ──
         "/help": cmd_help,
@@ -269,4 +330,8 @@ def make_handlers(
         "/admin_resume": cmd_admin_resume,
         "/admin_back": cmd_admin_back,
         "/admin_broadcast": cmd_admin_broadcast,
+        "/admin_whitelist": cmd_admin_whitelist,
+        "/admin_whitelist_grant": cmd_admin_whitelist_grant,
+        "/admin_whitelist_revoke": cmd_admin_whitelist_revoke,
+        "/admin_whitelist_list": cmd_admin_whitelist_list,
     }

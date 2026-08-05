@@ -1,5 +1,6 @@
 from html import escape
 from urllib.parse import parse_qs, urlparse
+from datetime import datetime
 
 from models.item import Item
 from storage.urls import SearchUrlRow
@@ -84,4 +85,15 @@ def format_admin_status(
         state=state, queue=queue_size, current=current_rate,
         target=target_rate, urls=active_urls, users=users,
     )
+
+
+def format_whitelist_list(entries: list[tuple[str, str, int]], language: str = "ru") -> str:
+    result = text("whitelist_list_title", language)
+    if not entries:
+        result += text("whitelist_list_empty", language)
+    else:
+        for user_id, granted_by, granted_at in entries:
+            dt = datetime.fromtimestamp(granted_at).strftime("%d.%m.%Y %H:%M")
+            result += text("whitelist_list_row", language, user_id=user_id, granted_by=granted_by, granted_at=dt)
+    return result
 

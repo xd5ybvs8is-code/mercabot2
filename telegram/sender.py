@@ -273,6 +273,7 @@ class MessageSender:
             from telegram.keyboard import (
                 build_keyboard_markup,
                 build_admin_keyboard_markup,
+                build_admin_whitelist_keyboard_markup,
                 build_cancel_keyboard_markup,
                 build_add_type_keyboard_markup,
             )
@@ -284,6 +285,13 @@ class MessageSender:
             elif msg.keyboard_kind == "add_type":
                 payload["reply_markup"] = build_add_type_keyboard_markup(
                     language=msg.language, placeholder=msg.placeholder,
+                )
+            elif msg.keyboard_kind == "admin_whitelist":
+                is_admin = msg.chat_id in self._admin_user_ids
+                payload["reply_markup"] = (
+                    build_admin_whitelist_keyboard_markup(language=msg.language, placeholder=msg.placeholder)
+                    if is_admin
+                    else build_keyboard_markup(False, language=msg.language, placeholder=msg.placeholder, is_subscribed=msg.is_subscribed)
                 )
             elif msg.keyboard_kind == "admin":
                 # Меню админ-панели — только для админа; на всякий случай
