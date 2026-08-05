@@ -152,6 +152,29 @@ class CryptoPayClient:
                 await asyncio.sleep(1)
         return []
 
+    async def delete_invoice(self, invoice_id: int) -> bool:
+        url = f"{CRYPTOBOT_API_URL}/deleteInvoice"
+        body = {"invoice_id": invoice_id}
+
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                async with self.session.post(url, headers=self._headers(), json=body) as resp:
+                    data = await resp.json()
+                    if resp.status == 200 and data.get("ok"):
+                        logger.info("🗑️ CryptoBot invoice #%s deleted", invoice_id)
+                        return True
+                    logger.error(
+                        "❌ CryptoBot deleteInvoice error: %s (invoice #%s)",
+                        data.get("error", {}).get("name"),
+                        invoice_id,
+                    )
+                    return False
+            except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+                logger.error("❌ CryptoBot request failed (attempt %s/%s): %s", attempt, MAX_RETRIES, exc)
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(1)
+        return False
+
     async def get_balance(self) -> list[dict[str, Any]]:
         url = f"{CRYPTOBOT_API_URL}/getBalance"
 

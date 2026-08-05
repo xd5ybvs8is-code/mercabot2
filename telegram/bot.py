@@ -798,6 +798,26 @@ class TelegramNotifier:
 
         await self._client.answer_callback_query(cb_id, tr("invoice_not_paid", language), show_alert=True)
 
+    async def _handle_cancel_invoice(
+        self, cb_id: str, invoice_id: int, chat_id: str, msg_id: int | None, language: str,
+    ) -> None:
+        if self._crypto_client is None or self._subs_storage is None:
+            await self._client.answer_callback_query(cb_id, tr("internal_error", language), show_alert=True)
+            return
+
+        sub = await self._subs_storage.get_any(chat_id)
+        if sub is None or sub.status != "pending" or sub.invoice_id != invoice_id:
+            await self._client.answer_callback_query(cb_id, tr("invoice_cancelled", language), show_alert=True)
+            if msg_id:
+                await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled", language))
+            return
+
+        await self._crypto_client.delete_invoice(invoice_id)
+        await self._subs_storage.cancel_pending(chat_id)
+        await self._client.answer_callback_query(cb_id)
+        if msg_id:
+            await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled_by_user", language))
+
     async def is_subscribed(self, chat_id: str) -> bool:
         if self._subs_storage is None:
             return True
@@ -854,6 +874,11 @@ class TelegramNotifier:
         if data.startswith("check_payment_"):
             invoice_id = int(data.removeprefix("check_payment_"))
             await self._handle_check_payment(cb_id, invoice_id, chat_id, msg_id, language)
+            return
+
+        if data.startswith("cancel_invoice_"):
+            invoice_id = int(data.removeprefix("cancel_invoice_"))
+            await self._handle_cancel_invoice(cb_id, invoice_id, chat_id, msg_id, language)
             return
 
         if data == "change_language":

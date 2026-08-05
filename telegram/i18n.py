@@ -248,6 +248,14 @@ TEXTS: dict[str, dict[Language, str]] = {
         "ru": "🔄 Проверить оплату",
         "en": "🔄 Check Payment",
     },
+    "cancel_invoice": {
+        "ru": "❌ Отменить оплату",
+        "en": "❌ Cancel Payment",
+    },
+    "invoice_cancelled_by_user": {
+        "ru": "❌ Вы отменили оплату.\n\nСчёт аннулирован. Вы можете создать новый счёт.",
+        "en": "❌ You cancelled the payment.\n\nThe invoice has been voided. You can create a new one.",
+    },
     "invoice_cancelled": {
         "ru": "⏰ Счёт на оплату отменён.\n\nВремя на оплату истекло (30 минут). Создайте новый счёт.",
         "en": "⏰ Invoice cancelled.\n\nPayment time expired (30 minutes). Create a new invoice.",

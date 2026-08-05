@@ -243,6 +243,7 @@ def build_invoice_keyboard(pay_url: str, invoice_id: int, language: str = "ru") 
     return {"inline_keyboard": [
         [{"text": button_text("pay_invoice", language), "url": pay_url}],
         [{"text": button_text("check_payment", language), "callback_data": f"check_payment_{invoice_id}"}],
+        [{"text": button_text("cancel_invoice", language), "callback_data": f"cancel_invoice_{invoice_id}"}],
     ]}
 
 
