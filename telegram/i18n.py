@@ -232,6 +232,10 @@ TEXTS: dict[str, dict[Language, str]] = {
         "ru": "✅ <b>Пробный доступ активирован на 12 часов!</b>\n\nТеперь вы можете добавлять URL и получать уведомления о новых объявлениях.\n\nПодписка истечёт автоматически.",
         "en": "✅ <b>Trial access activated for 12 hours!</b>\n\nNow you can add URLs and receive notifications about new listings.\n\nThe subscription will expire automatically.",
     },
+    "trial_activated_alert": {
+        "ru": "Пробный доступ активирован на 12 часов!",
+        "en": "Trial access activated for 12 hours!",
+    },
     "trial_already_used": {
         "ru": "❌ Вы уже использовали пробный доступ.\n\nПриобретите подписку для продолжения.",
         "en": "❌ You have already used your trial access.\n\nPurchase a subscription to continue.",

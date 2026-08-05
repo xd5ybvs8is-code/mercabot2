@@ -87,6 +87,8 @@ class TelegramNotifier:
         self._invoice_msg_ids: dict[str, int] = {}
         # Текущая страница пагинации для списка (по chat_id)
         self._list_pages: dict[str, int] = {}
+        # message_id welcome-сообщения с кнопкой пробного доступа (по chat_id)
+        self._trial_msg_ids: dict[str, int] = {}
 
     async def start(self) -> None:
         logger.info("⏳ Starting Telegram bot...")
@@ -314,13 +316,26 @@ class TelegramNotifier:
                         "🔄 /start from returning user %s: reactivated %s URL(s)",
                         chat_id, reactivated,
                     )
-            await self.send_message(chat_id, tr("welcome", language))
             if (
                 self._subs_storage is not None
                 and not await self._subs_storage.is_subscribed(chat_id)
                 and not await self._subs_storage.has_used_trial(chat_id)
             ):
-                await self._send_trial_offer(chat_id)
+                markup = build_trial_keyboard(language)
+                payload = {
+                    "chat_id": chat_id,
+                    "text": tr("welcome", language),
+                    "parse_mode": "HTML",
+                    "reply_markup": markup,
+                }
+                result = await self._client.call_api_json("sendMessage", payload)
+                if result and result.get("ok"):
+                    msg = result.get("result", {})
+                    msg_id = msg.get("message_id")
+                    if msg_id:
+                        self._trial_msg_ids[chat_id] = msg_id
+            else:
+                await self.send_message(chat_id, tr("welcome", language))
             return
 
         # ── Cancel active action ────────────────────────────────
@@ -643,17 +658,6 @@ class TelegramNotifier:
                 self._inline_msg_ids[chat_id] = msg_id
                 logger.debug("   📌 Subscription inline msg_id=%s saved for chat=%s", msg_id, chat_id)
 
-    async def _send_trial_offer(self, chat_id: str) -> None:
-        language = await self._get_language(chat_id)
-        markup = build_trial_keyboard(language)
-        payload = {
-            "chat_id": chat_id,
-            "text": tr("trial_prompt", language),
-            "parse_mode": "HTML",
-            "reply_markup": markup,
-        }
-        await self._client.call_api_json("sendMessage", payload)
-
     async def _handle_trial_activation(
         self, cb_id: str, chat_id: str, msg_id: int | None, language: str,
     ) -> None:
@@ -671,20 +675,18 @@ class TelegramNotifier:
 
         expires_at = int(time.time()) + 12 * 3600
         await self._subs_storage.activate_trial(chat_id, expires_at)
-        await self._client.answer_callback_query(cb_id)
 
-        if msg_id:
-            from datetime import datetime
-            expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
-            success_text = (
-                f"{tr('trial_activated', language)}\n\n"
-                f"⏰ До: {expires_str}"
-            )
+        trial_msg_id = self._trial_msg_ids.pop(chat_id, None) or msg_id
+        if trial_msg_id:
             await self._client.edit_message_text(
-                chat_id, msg_id, success_text, parse_mode="HTML",
+                chat_id, trial_msg_id,
+                tr("welcome", language),
+                parse_mode="HTML",
             )
-        else:
-            await self.send_message(chat_id, tr("trial_activated", language))
+
+        await self._client.answer_callback_query(
+            cb_id, tr("trial_activated_alert", language), show_alert=True,
+        )
 
         await self.send_message(
             chat_id,
