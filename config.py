@@ -19,6 +19,7 @@ class Settings:
     tg_send_rate: int
     tg_chat_min_interval: float
     admin_user_ids: frozenset[str]
+    cryptobot_api_token: str
 
 
 def _parse_check_interval(raw: str | None) -> int:
@@ -78,4 +79,5 @@ def load_settings(env_path: Path | None = None) -> Settings:
         tg_send_rate=_parse_int(os.getenv("TG_SEND_RATE"), 20, "TG_SEND_RATE"),
         tg_chat_min_interval=_parse_float(os.getenv("TG_CHAT_MIN_INTERVAL"), 1.0, "TG_CHAT_MIN_INTERVAL"),
         admin_user_ids=_parse_admin_ids(os.getenv("ADMIN_USER_IDS")),
+        cryptobot_api_token=os.getenv("CRYPTOBOT_API_TOKEN", "").strip(),
     )

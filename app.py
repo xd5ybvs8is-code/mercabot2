@@ -1,14 +1,18 @@
 import asyncio
+import json
 import logging
 import signal
 import sys
+import time
 from pathlib import Path
 
 from config import load_settings
+from crypto.client import CryptoPayClient
 from mercari.client import MercariClient
 from mercari.devices import DeviceRegistry
 from mercari.watcher import MercariWatcher
 from storage.connection import DatabaseConnection
+from storage.subscriptions import SubscriptionStorage
 from storage.urls import UrlStorage
 from storage.users import UserStorage
 from telegram.bot import TelegramNotifier
@@ -57,6 +61,81 @@ async def _notify_all_users(
     logger.info("Notification sent to all %s users", len(chat_ids))
 
 
+async def _poll_invoices_loop(
+    crypto_client: CryptoPayClient,
+    subs_storage: SubscriptionStorage,
+    telegram: TelegramNotifier,
+    interval: float = 30.0,
+) -> None:
+    """Periodically check pending invoices and activate paid subscriptions."""
+    logger = logging.getLogger(__name__)
+    logger.info("=" * 50)
+    logger.info("🔄 INVOICE POLLING LOOP STARTED")
+    logger.info("   Interval: %s seconds", interval)
+    logger.info("=" * 50)
+    while True:
+        try:
+            pending = await subs_storage.get_pending_invoices()
+            if pending:
+                invoice_ids = [s.invoice_id for s in pending if s.invoice_id is not None]
+                if invoice_ids:
+                    invoices = await crypto_client.get_invoices(invoice_ids)
+                    paid_map = {i.invoice_id: i for i in invoices if i.status == "paid"}
+                    if paid_map:
+                        logger.info("💰 %s paid invoice(s) found for pending subscriptions", len(paid_map))
+                    for sub in pending:
+                        if sub.invoice_id in paid_map:
+                            inv = paid_map[sub.invoice_id]
+                            plan_days = 7 if sub.plan == "7d" else 30
+                            if sub.plan not in ("7d", "30d"):
+                                plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+                            expires_at = int(time.time()) + plan_days * 86400
+                            await subs_storage.activate(
+                                user_id=sub.user_id,
+                                plan=sub.plan,
+                                invoice_id=sub.invoice_id,
+                                payment_hash=inv.hash,
+                                paid_amount=inv.amount,
+                                paid_asset=inv.asset,
+                                expires_at=expires_at,
+                            )
+                            language = await telegram.get_language(sub.user_id)
+                            from datetime import datetime
+                            expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
+                            await telegram.send_message(
+                                sub.user_id,
+                                f"✅ Подписка активирована!\n\n📦 {sub.plan} дней\n⏰ До: {expires_str}",
+                            )
+        except Exception:
+            logger.exception("Invoice polling error")
+        await asyncio.sleep(interval)
+
+
+async def _expire_subscriptions_loop(
+    subs_storage: SubscriptionStorage,
+    url_storage: UrlStorage,
+    interval: float = 600.0,
+) -> None:
+    """Periodically mark expired subscriptions and deactivate their URLs."""
+    logger = logging.getLogger(__name__)
+    logger.info("=" * 50)
+    logger.info("⏰ SUBSCRIPTION EXPIRY CHECKER STARTED")
+    logger.info("   Interval: %s seconds", interval)
+    logger.info("=" * 50)
+    while True:
+        try:
+            expired = await subs_storage.get_all_expired_active()
+            if expired:
+                logger.info("⏰ %s expired subscription(s) found", len(expired))
+            for sub in expired:
+                await subs_storage.mark_expired(sub.user_id)
+                await url_storage.deactivate_chat(sub.user_id)
+                logger.info("⏰ Expired subscription for user %s — URLs deactivated", sub.user_id)
+        except Exception:
+            logger.exception("Expiry checker error")
+        await asyncio.sleep(interval)
+
+
 async def main() -> None:
     setup_logging()
     logger = logging.getLogger(__name__)
@@ -81,6 +160,7 @@ async def main() -> None:
     logger.info("   Telegram token: %s...%s", settings.telegram_token[:5], settings.telegram_token[-5:])
     logger.info("   TG send rate: %s msg/sec (chat interval: %ss)", settings.tg_send_rate, settings.tg_chat_min_interval)
     logger.info("   Admin users: %s (%s)", len(settings.admin_user_ids), sorted(settings.admin_user_ids) or "none")
+    logger.info("   CryptoBot token: %s...%s", settings.cryptobot_api_token[:5], settings.cryptobot_api_token[-5:] if len(settings.cryptobot_api_token) > 5 else "N/A")
 
     # ── 2. Database ──────────────────────────────────────────────
     logger.info("─" * 40)
@@ -94,6 +174,7 @@ async def main() -> None:
     logger.info("STEP 3/7: Initializing URL storage...")
     url_storage = UrlStorage(db)
     user_storage = UserStorage(db)
+    subs_storage = SubscriptionStorage(db)
     active_urls = await url_storage.get_active_urls()
     logger.info("✅ URL storage initialized")
     logger.info("   Active search URLs: %s", len(active_urls))
@@ -121,6 +202,17 @@ async def main() -> None:
     logger.info("   Request delay: %s", settings.request_delay)
     logger.info("   API URL: https://api.mercari.jp/v2/entities:search")
 
+    # ── 5b. CryptoBot Client ────────────────────────────────────
+    logger.info("─" * 40)
+    logger.info("STEP 5b/7: Starting CryptoBot client...")
+    crypto_client: CryptoPayClient | None = None
+    if settings.cryptobot_api_token:
+        crypto_client = CryptoPayClient(settings.cryptobot_api_token)
+        await crypto_client.start()
+        logger.info("✅ CryptoBot client started")
+    else:
+        logger.info("⚠️  CRYPTOBOT_API_TOKEN is empty — subscription payments disabled")
+
     # ── 6. Telegram Bot ─────────────────────────────────────────
     logger.info("─" * 40)
     logger.info("STEP 6/7: Starting Telegram bot...")
@@ -131,10 +223,12 @@ async def main() -> None:
         admin_user_ids=settings.admin_user_ids,
         url_storage=url_storage,
         user_storage=user_storage,
+        subs_storage=subs_storage,
+        crypto_client=crypto_client,
     )
-    watcher = MercariWatcher(settings, url_storage, telegram, client, devices)
+    watcher = MercariWatcher(settings, url_storage, telegram, client, devices, subs_storage)
 
-    handlers = make_handlers(url_storage, watcher, telegram, settings.admin_user_ids)
+    handlers = make_handlers(url_storage, watcher, telegram, settings.admin_user_ids, subs_storage)
     telegram.register_commands(handlers)
     logger.info("   Registered %s command handlers", len(handlers))
     for cmd in handlers:
@@ -152,6 +246,19 @@ async def main() -> None:
     stop_event = asyncio.Event()
     poll_task = asyncio.create_task(telegram.poll_commands(stop_event))
     logger.info("✅ Command polling loop started (interval: 2s)")
+
+    # ── Background: invoice polling ──────────────────────────────
+    invoice_poll_task: asyncio.Task[None] | None = None
+    expiry_task: asyncio.Task[None] | None = None
+    if crypto_client is not None:
+        invoice_poll_task = asyncio.create_task(
+            _poll_invoices_loop(crypto_client, subs_storage, telegram),
+        )
+        logger.info("✅ Invoice polling started (interval: 30s)")
+        expiry_task = asyncio.create_task(
+            _expire_subscriptions_loop(subs_storage, url_storage),
+        )
+        logger.info("✅ Subscription expiry checker started (interval: 10min)")
 
     # ── Start notification ──────────────────────────────────────
     logger.info("=" * 50)
@@ -182,6 +289,28 @@ async def main() -> None:
         stop_event.set()
         await poll_task
         logger.info("  ✅ Polling stopped")
+
+        if invoice_poll_task:
+            logger.info("  • Stopping invoice polling...")
+            invoice_poll_task.cancel()
+            try:
+                await invoice_poll_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("  ✅ Invoice polling stopped")
+        if expiry_task:
+            logger.info("  • Stopping expiry checker...")
+            expiry_task.cancel()
+            try:
+                await expiry_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("  ✅ Expiry checker stopped")
+
+        if crypto_client:
+            logger.info("  • Closing CryptoBot client...")
+            await crypto_client.close()
+            logger.info("  ✅ CryptoBot client closed")
 
         logger.info("  • Closing Mercari client...")
         await client.aclose()

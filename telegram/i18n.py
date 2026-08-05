@@ -183,15 +183,44 @@ TEXTS: dict[str, dict[Language, str]] = {
     "startup": {"ru": "Mercari Watcher запущен\n\nБот начал отслеживать новые объявления.", "en": "Mercari Watcher started\n\nThe bot started tracking new listings."},
     "shutdown": {"ru": "Mercari Watcher остановлен\n\nБот завершил работу.", "en": "Mercari Watcher stopped\n\nThe bot has shut down."},
     "subscription_btn": {"ru": "💎 Купить подписку", "en": "💎 Buy Subscription"},
+    "subscription_status_btn": {"ru": "💎 Моя подписка", "en": "💎 My Subscription"},
     "subscription_title": {
         "ru": "💎 Подписка Mercari jp Parser\n\nПодписка открывает доступ к отслеживанию новых объявлений на Mercari Japan:\n\n• Мгновенные уведомления о новых товарах\n• Отслеживание по ключевым словам и ссылкам\n\nВыберите срок подписки:",
         "en": "💎 Mercari jp Parser Subscription\n\nSubscription gives access to tracking new listings on Mercari Japan:\n\n• Instant notifications for new items\n• Tracking by keywords and links\n\nChoose a subscription period:",
     },
     "sub_7d": {"ru": "7 дней — 100₽", "en": "7 days — 100₽"},
     "sub_30d": {"ru": "30 дней — 300₽", "en": "30 days — 300₽"},
-    "subscription_selected": {
-        "ru": "✅ Вы выбрали: {plan}\n\nОплата через Telegram Stars будет доступна в ближайшее время.",
-        "en": "✅ You selected: {plan}\n\nPayment via Telegram Stars will be available soon.",
+    "no_subscription": {
+        "ru": "💎 Для этого действия нужна активная подписка.\n\nНажмите «💎 Купить подписку» в меню.",
+        "en": "💎 An active subscription is required for this action.\n\nPress «💎 Buy Subscription» in the menu.",
+    },
+    "invoice_created": {
+        "ru": "✅ Счёт на оплату создан.\n\n📦 {plan}\n\n🔗 <a href=\"{pay_url}\">Оплатить через CryptoBot</a>",
+        "en": "✅ Invoice created.\n\n📦 {plan}\n\n🔗 <a href=\"{pay_url}\">Pay via CryptoBot</a>",
+    },
+    "invoice_error": {
+        "ru": "❌ Не удалось создать счёт. Попробуйте позже.",
+        "en": "❌ Failed to create invoice. Please try again later.",
+    },
+    "subscription_status_title": {
+        "ru": "💎 <b>Моя подписка</b>",
+        "en": "💎 <b>My Subscription</b>",
+    },
+    "subscription_status_active": {
+        "ru": "✅ Статус: <b>Активна</b>\n⏰ До: <b>{expires}</b>\n📦 План: <b>{plan}</b>",
+        "en": "✅ Status: <b>Active</b>\n⏰ Until: <b>{expires}</b>\n📦 Plan: <b>{plan}</b>",
+    },
+    "subscription_status_pending": {
+        "ru": "⏳ Статус: <b>Ожидает оплаты</b>\n\nСчёт ещё не оплачен.",
+        "en": "⏳ Status: <b>Awaiting payment</b>\n\nThe invoice has not been paid yet.",
+    },
+    "subscription_status_no": {
+        "ru": "❌ У вас нет активной подписки.\n\nНажмите кнопку ниже чтобы приобрести:",
+        "en": "❌ You don't have an active subscription.\n\nPress the button below to purchase:",
+    },
+    "subscription_extend_btn": {
+        "ru": "💎 Продлить подписку",
+        "en": "💎 Extend Subscription",
     },
 }
 

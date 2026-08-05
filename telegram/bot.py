@@ -1,6 +1,7 @@
 import asyncio
 from html import escape
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -31,6 +32,8 @@ from storage.users import UserStorage
 
 if TYPE_CHECKING:
     from storage.urls import UrlStorage
+    from storage.subscriptions import SubscriptionStorage
+    from crypto.client import CryptoPayClient
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +56,15 @@ class TelegramNotifier:
         admin_user_ids: frozenset[str] = frozenset(),
         url_storage: "UrlStorage | None" = None,
         user_storage: UserStorage | None = None,
+        subs_storage: "SubscriptionStorage | None" = None,
+        crypto_client: "CryptoPayClient | None" = None,
     ) -> None:
         self._client = TelegramClient(token)
         self._admin_user_ids = admin_user_ids
         self._url_storage = url_storage
         self._user_storage = user_storage
+        self._subs_storage = subs_storage
+        self._crypto_client = crypto_client
         self._sender = MessageSender(
             self._client,
             rate_per_sec=rate_per_sec,
@@ -122,6 +129,7 @@ class TelegramNotifier:
         placeholder: str | None = None,
     ) -> bool:
         language = await self._get_language(chat_id)
+        is_subscribed = await self.is_subscribed(chat_id)
         self._sender.enqueue(
             chat_id,
             text,
@@ -131,6 +139,7 @@ class TelegramNotifier:
             keyboard_kind=keyboard_kind,
             language=language,
             placeholder=placeholder,
+            is_subscribed=is_subscribed,
         )
         return True
 
@@ -410,6 +419,9 @@ class TelegramNotifier:
             return
 
         if action == "__await_add__":
+            if not await self.is_subscribed(chat_id):
+                await self.send_message(chat_id, tr("no_subscription", language))
+                return
             logger.info("   → User %s pressed 'Add' button", chat_id)
             self._awaiting[chat_id] = {"phase": "add_type"}
             await self.send_message(
@@ -566,6 +578,41 @@ class TelegramNotifier:
 
     async def _show_subscription(self, chat_id: str) -> None:
         language = await self._get_language(chat_id)
+        if self._subs_storage is not None:
+            sub = await self._subs_storage.get_any(chat_id)
+            if sub is not None and sub.status == "active" and sub.expires_at and sub.expires_at > int(time.time()):
+                from datetime import datetime
+                expires_str = datetime.fromtimestamp(sub.expires_at).strftime("%d.%m.%Y %H:%M")
+                plan_label = "7 дней" if sub.plan == "7d" else f"{sub.plan} дней"
+                if language == "en":
+                    plan_label = "7 days" if sub.plan == "7d" else f"{sub.plan} days"
+                status_text = (
+                    f"{tr('subscription_status_title', language)}\n\n"
+                    f"{tr('subscription_status_active', language, expires=expires_str, plan=plan_label)}\n\n"
+                    f"{tr('subscription_extend_btn', language)}"
+                )
+                markup = build_subscription_inline_keyboard(language)
+                payload = {
+                    "chat_id": chat_id,
+                    "text": status_text,
+                    "parse_mode": "HTML",
+                    "reply_markup": markup,
+                }
+                result = await self._client.call_api_json("sendMessage", payload)
+                if result and result.get("ok"):
+                    msg = result.get("result", {})
+                    msg_id = msg.get("message_id")
+                    if msg_id:
+                        self._inline_msg_ids[chat_id] = msg_id
+                return
+            elif sub is not None and sub.status == "pending":
+                status_text = (
+                    f"{tr('subscription_status_title', language)}\n\n"
+                    f"{tr('subscription_status_pending', language)}"
+                )
+                await self.send_message(chat_id, status_text)
+                return
+
         sub_text = tr("subscription_title", language)
         markup = build_subscription_inline_keyboard(language)
         payload = {
@@ -581,6 +628,54 @@ class TelegramNotifier:
             if msg_id:
                 self._inline_msg_ids[chat_id] = msg_id
                 logger.debug("   📌 Subscription inline msg_id=%s saved for chat=%s", msg_id, chat_id)
+
+    async def _handle_subscription_purchase(
+        self, cb_id: str, plan: str, chat_id: str, language: str,
+    ) -> None:
+        if self._crypto_client is None or self._subs_storage is None:
+            await self._client.answer_callback_query(
+                cb_id,
+                tr("internal_error", language),
+                show_alert=True,
+            )
+            return
+
+        plan_days = 7 if plan == "sub_7d" else 30
+        plan_price = "100" if plan == "sub_7d" else "300"
+        plan_label = tr(plan, language)
+
+        import json as _json
+        payload = _json.dumps({"plan": plan_days, "user_id": chat_id})
+
+        invoice = await self._crypto_client.create_invoice(
+            amount=plan_price,
+            asset="USDT",
+            currency_type="fiat",
+            fiat="RUB",
+            description=f"Подписка Mercari Bot — {plan_days} дней",
+            payload=payload,
+        )
+
+        if invoice is None:
+            await self._client.answer_callback_query(
+                cb_id,
+                tr("invoice_error", language),
+                show_alert=True,
+            )
+            return
+
+        await self._subs_storage.create(chat_id, f"{plan_days}d", invoice.invoice_id)
+        await self._client.answer_callback_query(cb_id)
+
+        await self.send_message(
+            chat_id,
+            tr("invoice_created", language, plan=plan_label, pay_url=escape(invoice.pay_url)),
+        )
+
+    async def is_subscribed(self, chat_id: str) -> bool:
+        if self._subs_storage is None:
+            return True
+        return await self._subs_storage.is_subscribed(chat_id)
 
     async def _handle_callback_query(self, callback_query: dict[str, Any]) -> None:
         cb_id = callback_query.get("id", "")
@@ -623,7 +718,7 @@ class TelegramNotifier:
             return
 
         if data in ("sub_7d", "sub_30d"):
-            await self._client.answer_callback_query(cb_id)
+            await self._handle_subscription_purchase(cb_id, data, chat_id, language)
             return
 
         if data == "change_language":
@@ -712,6 +807,9 @@ class TelegramNotifier:
             return
 
         if data == "rename_list":
+            if not await self.is_subscribed(chat_id):
+                await self._client.answer_callback_query(cb_id, tr("no_subscription", language), show_alert=True)
+                return
             if self._url_storage is None:
                 await self._client.answer_callback_query(cb_id, tr("internal_error", language), show_alert=True)
                 return
@@ -734,6 +832,9 @@ class TelegramNotifier:
             return
 
         if data.startswith("rnm_"):
+            if not await self.is_subscribed(chat_id):
+                await self._client.answer_callback_query(cb_id, tr("no_subscription", language), show_alert=True)
+                return
             try:
                 url_id = int(data[4:])
             except ValueError:
@@ -771,6 +872,9 @@ class TelegramNotifier:
             return
 
         if data.startswith("del_"):
+            if not await self.is_subscribed(chat_id):
+                await self._client.answer_callback_query(cb_id, tr("no_subscription", language), show_alert=True)
+                return
             try:
                 url_id = int(data[4:])
             except ValueError:
@@ -802,6 +906,9 @@ class TelegramNotifier:
             return
 
         if data.startswith("confirm_"):
+            if not await self.is_subscribed(chat_id):
+                await self._client.answer_callback_query(cb_id, tr("no_subscription", language), show_alert=True)
+                return
             try:
                 url_id = int(data[8:])
             except ValueError:

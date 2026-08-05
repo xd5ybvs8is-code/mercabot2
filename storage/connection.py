@@ -101,6 +101,23 @@ MIGRATE_DEACTIVATED_AT_SQL = """
 ALTER TABLE search_urls ADD COLUMN deactivated_at INTEGER;
 """
 
+CREATE_TABLE_SUBSCRIPTIONS_SQL = """
+CREATE TABLE IF NOT EXISTS subscriptions (
+    user_id       TEXT PRIMARY KEY,
+    plan          TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'active', 'expired', 'cancelled')),
+    subscribed_at INTEGER,
+    expires_at    INTEGER,
+    invoice_id    INTEGER,
+    payment_hash  TEXT,
+    paid_amount   TEXT,
+    paid_asset    TEXT,
+    created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at    INTEGER NOT NULL DEFAULT (unixepoch())
+);
+"""
+
 
 class DatabaseConnection:
     """Manages async SQLite connection and schema creation."""
@@ -139,6 +156,8 @@ class DatabaseConnection:
         logger.debug("  • Creating table: users...")
         await self._conn.execute(CREATE_TABLE_USERS_SQL)
         await self._conn.execute(MIGRATE_EXISTING_USERS_SQL)
+        logger.debug("  • Creating table: subscriptions...")
+        await self._conn.execute(CREATE_TABLE_SUBSCRIPTIONS_SQL)
         logger.debug("  • Creating index: idx_seen_items_url_id...")
         await self._conn.execute(CREATE_INDEX_SEEN_ITEMS_SQL)
         logger.debug("  • Creating index: idx_notification_outbox_created_at...")
@@ -153,7 +172,7 @@ class DatabaseConnection:
         logger.info("🗄️  DATABASE CONNECTED")
         logger.info("   Path: %s", self._db_path)
         logger.info("   Mode: WAL (Write-Ahead Logging)")
-        logger.info("   Tables: items, search_urls, seen_items, users")
+        logger.info("   Tables: items, search_urls, seen_items, users, subscriptions")
         logger.info("=" * 50)
 
     @asynccontextmanager

@@ -4,6 +4,7 @@ from urllib.parse import quote_plus
 
 from mercari.conditions import parse_search_url, normalize_search_url
 from storage.urls import UrlStorage
+from storage.subscriptions import SubscriptionStorage
 from mercari.watcher import MercariWatcher
 from telegram.bot import TelegramNotifier
 from telegram.messages import (
@@ -36,6 +37,7 @@ def make_handlers(
     watcher: MercariWatcher,
     telegram: TelegramNotifier,
     admin_user_ids: frozenset[str] = frozenset(),
+    subs_storage: SubscriptionStorage | None = None,
 ) -> dict:
     """Create a dict of async command handlers for TelegramNotifier.
 
@@ -45,6 +47,14 @@ def make_handlers(
     def _is_admin(user_id: str) -> bool:
         return user_id in admin_user_ids
 
+    async def _check_subscription(chat_id: str, language: str) -> str | None:
+        """Returns None if subscribed, or an error message if not."""
+        if subs_storage is None:
+            return None
+        if not await subs_storage.is_subscribed(chat_id):
+            return text("no_subscription", language)
+        return None
+
     # ── Пользовательские команды ──────────────────────────────────
 
     async def cmd_help(_arg: str, chat_id: str, _user_id: str, language: str) -> str:
@@ -53,6 +63,11 @@ def make_handlers(
 
     async def cmd_add(url: str, chat_id: str, _user_id: str, language: str) -> str:
         logger.info("💬 /add from user %s: '%s'", chat_id, url[:100])
+
+        err = await _check_subscription(chat_id, language)
+        if err:
+            return err
+
         if not url:
             logger.warning("   ⚠️  Empty input from user %s", chat_id)
             return text("provide_search", language)
@@ -97,6 +112,11 @@ def make_handlers(
 
     async def cmd_remove(arg: str, chat_id: str, _user_id: str, language: str) -> str:
         logger.info("💬 /remove from user %s: '%s'", chat_id, arg)
+
+        err = await _check_subscription(chat_id, language)
+        if err:
+            return err
+
         if not arg or not arg.isdigit():
             logger.warning("   ⚠️  Invalid ID from user %s: '%s'", chat_id, arg)
             return text("invalid_id", language)
@@ -109,6 +129,11 @@ def make_handlers(
 
     async def cmd_rename(arg: str, chat_id: str, _user_id: str, language: str) -> str:
         logger.info("💬 /rename from user %s: '%s'", chat_id, arg[:80])
+
+        err = await _check_subscription(chat_id, language)
+        if err:
+            return err
+
         """/rename id | new name"""
         if not arg or " | " not in arg:
             return text("rename_usage", language)

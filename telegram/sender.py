@@ -54,6 +54,8 @@ class OutgoingMessage:
     language: str = field(default="ru", compare=False)
     # Подсказка в поле ввода (input_field_placeholder в ReplyKeyboardMarkup).
     placeholder: str | None = field(default=None, compare=False)
+    # Есть ли у чата активная подписка (влияет на текст кнопки в меню).
+    is_subscribed: bool = field(default=False, compare=False)
     # Счётчик неудачных попыток отправки. После _MAX_ATTEMPTS сообщение дропается.
     attempts: int = field(default=0, compare=False)
     # Durable notification acknowledgement, called only after Telegram accepts it.
@@ -144,6 +146,7 @@ class MessageSender:
         keyboard_kind: str = "main",
         language: str = "ru",
         placeholder: str | None = None,
+        is_subscribed: bool = False,
         on_success: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """Кладёт сообщение в очередь. Не блокирует.
@@ -164,6 +167,7 @@ class MessageSender:
             keyboard_kind=keyboard_kind,
             language=language,
             placeholder=placeholder,
+            is_subscribed=is_subscribed,
             on_success=on_success,
         )
         self._queue.put_nowait(msg)
@@ -288,13 +292,14 @@ class MessageSender:
                 payload["reply_markup"] = (
                     build_admin_keyboard_markup(language=msg.language, placeholder=msg.placeholder)
                     if is_admin
-                    else build_keyboard_markup(False, language=msg.language, placeholder=msg.placeholder)
+                    else build_keyboard_markup(False, language=msg.language, placeholder=msg.placeholder, is_subscribed=msg.is_subscribed)
                 )
             else:
                 # Основная клавиатура: админ видит доп. ряд с входом в панель.
                 is_admin = msg.chat_id in self._admin_user_ids
                 payload["reply_markup"] = build_keyboard_markup(
                     is_admin, language=msg.language, placeholder=msg.placeholder,
+                    is_subscribed=msg.is_subscribed,
                 )
 
         try:

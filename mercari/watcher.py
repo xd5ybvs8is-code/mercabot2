@@ -7,6 +7,7 @@ from mercari.conditions import parse_search_url
 from mercari.devices import DeviceRegistry
 from models.item import Item
 from storage.urls import UrlStorage, SearchUrlRow
+from storage.subscriptions import SubscriptionStorage
 from telegram.bot import TelegramNotifier
 
 logger = logging.getLogger(__name__)
@@ -22,14 +23,14 @@ class MercariWatcher:
         telegram: TelegramNotifier,
         client: MercariClient,
         devices: DeviceRegistry,
+        subs_storage: SubscriptionStorage | None = None,
     ) -> None:
         self._settings = settings
         self._url_storage = url_storage
         self._telegram = telegram
         self._client = client
-        # Per-user DPoP-личности: каждый URL принадлежит конкретному chat_id,
-        # значит запрос к Mercari уходит от имени соответствующего «устройства».
         self._devices = devices
+        self._subs_storage = subs_storage
         self._stop = False
         self._force_reload = False
         # Приостановка watcher'а администратором: цикл остаётся жив,
@@ -299,6 +300,15 @@ class MercariWatcher:
             async with self._url_storage.transaction():
                 await self._url_storage.mark_seen_bulk(url_row.id, list(new_ids))
             logger.info("   🔇 Startup mode — %s new item(s) marked as seen", len(new_items))
+            return
+
+        if self._subs_storage is not None and not await self._subs_storage.is_subscribed(url_row.user_chat_id):
+            async with self._url_storage.transaction():
+                await self._url_storage.mark_seen_bulk(url_row.id, list(new_ids))
+            logger.info(
+                "   🚫 User %s has no active subscription — %s new item(s) silently skipped",
+                url_row.user_chat_id, len(new_items),
+            )
             return
 
         # Persist each notification before enqueueing it. The sender's success

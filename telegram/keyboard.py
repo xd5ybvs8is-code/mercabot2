@@ -14,6 +14,7 @@ def build_keyboard_markup(
     is_admin: bool = False,
     language: str = "ru",
     placeholder: str | None = None,
+    is_subscribed: bool = False,
 ) -> dict[str, Any]:
     """Build reply keyboard markup.
 
@@ -22,8 +23,9 @@ def build_keyboard_markup(
     администратор. Сам layout админ-панели (ADMIN_KEYBOARD) отправляется
     отдельным сообщением при входе в /admin_panel, а не каждой отправкой.
     """
+    sub_key = "subscription_btn" if not is_subscribed else "subscription_status_btn"
     keyboard = [
-        [{"text": button_text("subscription_btn", language)}],
+        [{"text": button_text(sub_key, language)}],
         [{"text": button_text("my_urls", language)}],
         [{"text": button_text("add_url", language)}],
         [{"text": button_text("help_button", language)}, {"text": LANGUAGE_BUTTON}],
@@ -103,10 +105,12 @@ BUTTON_ACTIONS: dict[str, str] = {
     "📋 Мои URL": "__await_list__",
     "➕ Добавить URL": "__await_add__",
     "💎 Купить подписку": "__await_subscription__",
+    "💎 Моя подписка": "__await_subscription__",
     "❓ Помощь": "/help",
     "📋 My URLs": "__await_list__",
     "➕ Add URL": "__await_add__",
     "💎 Buy Subscription": "__await_subscription__",
+    "💎 My Subscription": "__await_subscription__",
     "❓ Help": "/help",
     LANGUAGE_BUTTON: "__language__",
     # ── вход в админ-панель ──
