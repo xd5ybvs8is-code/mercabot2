@@ -276,6 +276,7 @@ class MessageSender:
                 build_admin_whitelist_keyboard_markup,
                 build_cancel_keyboard_markup,
                 build_add_type_keyboard_markup,
+                build_url_management_keyboard_markup,
             )
 
             if msg.keyboard_kind == "cancel":
@@ -301,6 +302,10 @@ class MessageSender:
                     build_admin_keyboard_markup(language=msg.language, placeholder=msg.placeholder)
                     if is_admin
                     else build_keyboard_markup(False, language=msg.language, placeholder=msg.placeholder, is_subscribed=msg.is_subscribed)
+                )
+            elif msg.keyboard_kind == "url_management":
+                payload["reply_markup"] = build_url_management_keyboard_markup(
+                    language=msg.language, placeholder=msg.placeholder,
                 )
             else:
                 # Основная клавиатура: админ видит доп. ряд с входом в панель.

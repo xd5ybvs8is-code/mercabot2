@@ -26,8 +26,7 @@ def build_keyboard_markup(
     sub_key = "subscription_btn" if not is_subscribed else "subscription_status_btn"
     keyboard = [
         [{"text": button_text(sub_key, language)}],
-        [{"text": button_text("my_urls", language)}],
-        [{"text": button_text("add_url", language)}],
+        [{"text": button_text("manage_urls", language)}],
         [{"text": button_text("help_button", language)}, {"text": LANGUAGE_BUTTON}],
     ]
     if is_admin:
@@ -118,6 +117,25 @@ def build_add_type_keyboard_markup(
     return result
 
 
+def build_url_management_keyboard_markup(
+    language: str = "ru",
+    placeholder: str | None = None,
+) -> dict[str, Any]:
+    """Build URL management sub-panel reply keyboard markup."""
+    result: dict[str, Any] = {
+        "keyboard": [
+            [{"text": button_text("my_urls", language)}],
+            [{"text": button_text("add_url", language)}],
+            [{"text": button_text("back", language)}],
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False,
+    }
+    if placeholder:
+        result["input_field_placeholder"] = placeholder
+    return result
+
+
 # Map button text → internal command.
 # Пользовательские кнопки маппят в обычные команды;
 # админские — в /admin_* команды или спец-состояния (см. bot.py).
@@ -127,12 +145,13 @@ BUTTON_ACTIONS: dict[str, str] = {
     "➕ Добавить URL": "__await_add__",
     "💎 Купить подписку": "__await_subscription__",
     "💎 Моя подписка": "__await_subscription__",
-    "❓ Помощь": "/help",
+    "📁 Управление URL": "__url_management__",
+    "📁 Manage URLs": "__url_management__",
+    "❓ FAQ": "/help",
     "📋 My URLs": "__await_list__",
     "➕ Add URL": "__await_add__",
     "💎 Buy Subscription": "__await_subscription__",
     "💎 My Subscription": "__await_subscription__",
-    "❓ Help": "/help",
     LANGUAGE_BUTTON: "__language__",
     # ── вход в админ-панель ──
     "🛠 Админ-панель": "/admin_panel",

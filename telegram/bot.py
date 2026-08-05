@@ -528,6 +528,16 @@ class TelegramNotifier:
             await self._show_subscription(chat_id)
             return
 
+        if action == "__url_management__":
+            logger.info("   → User %s pressed 'Manage URLs' button", chat_id)
+            self._awaiting[chat_id] = {"phase": "url_management"}
+            await self.send_message(
+                chat_id,
+                tr("url_management_title", language),
+                keyboard_kind="url_management",
+            )
+            return
+
         if action is not None:
             logger.info("   → User %s pressed button '%s'", chat_id, text)
 

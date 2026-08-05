@@ -8,7 +8,9 @@ DEFAULT_LANGUAGE: Language = "ru"
 TEXTS: dict[str, dict[Language, str]] = {
     "my_urls": {"ru": "📋 Мои URL", "en": "📋 My URLs"},
     "add_url": {"ru": "➕ Добавить URL", "en": "➕ Add URL"},
-    "help_button": {"ru": "❓ Помощь", "en": "❓ Help"},
+    "help_button": {"ru": "❓ FAQ", "en": "❓ FAQ"},
+    "manage_urls": {"ru": "📁 Управление URL", "en": "📁 Manage URLs"},
+    "url_management_title": {"ru": "📁 <b>Управление URL</b>\n\nВыберите действие:", "en": "📁 <b>Manage URLs</b>\n\nChoose an action:"},
     "admin_panel_btn": {"ru": "🛠 Админ-панель", "en": "🛠 Admin panel"},
     "status": {"ru": "📊 Статус бота", "en": "📊 Bot status"},
     "reload_urls": {"ru": "🔄 Перезагрузить URL", "en": "🔄 Reload URLs"},
@@ -78,8 +80,8 @@ TEXTS: dict[str, dict[Language, str]] = {
     "url_renamed": {"ru": "✅ URL переименован в: {name}", "en": "✅ URL renamed to: {name}"},
     "url_not_found": {"ru": "❌ URL не найден", "en": "❌ URL not found"},
     "no_urls": {
-        "ru": "У вас нет отслеживаемых URL.\nДобавьте через кнопку ➕ Добавить URL",
-        "en": "You have no tracked URLs.\nAdd one using the ➕ Add URL button",
+        "ru": "У вас нет отслеживаемых URL.\nДобавьте через 📁 Управление URL → ➕ Добавить URL",
+        "en": "You have no tracked URLs.\nAdd one via 📁 Manage URLs → ➕ Add URL",
     },
     "unknown_command": {
         "ru": "❌ Неизвестная команда: {command}\n\nИспользуй кнопки внизу или /help для справки.",
@@ -87,8 +89,8 @@ TEXTS: dict[str, dict[Language, str]] = {
     },
     "error": {"ru": "❌ Ошибка: {error}", "en": "❌ Error: {error}"},
     "help": {
-        "ru": "❓ Помощь\n\nЭтот бот отслеживает новые объявления на Mercari Japan.\n\nКогда появляется новое объявление, бот отправляет его название, цену и ссылку.\n\nОсновные действия:\n\n➕ Добавить URL\nДобавьте ссылку на поиск Mercari или укажите ключевое слово.\n\n📋 Мои URL\nПросмотрите все сохранённые поиски. Для каждого поиска можно:\n• посмотреть подробности;\n• переименовать его;\n• удалить его.\n\nИспользуйте только ссылки с домена jp.mercari.com.",
-        "en": "❓ Help\n\nThis bot tracks new listings on Mercari Japan.\n\nWhen a new listing appears, the bot sends its title, price, and link.\n\nMain actions:\n\n➕ Add URL\nAdd a Mercari search link or enter a keyword.\n\n📋 My URLs\nView all saved searches. For each search you can:\n• view details;\n• rename it;\n• delete it.\n\nUse only links from the jp.mercari.com domain.",
+        "ru": "❓ FAQ\n\nЭтот бот отслеживает новые объявления на Mercari Japan.\n\nКогда появляется новое объявление, бот отправляет его название, цену и ссылку.\n\nОсновные действия:\n\n📁 Управление URL\nРаздел для управления вашими поисками. Здесь можно:\n• ➕ Добавить URL — добавить ссылку или ключевое слово;\n• 📋 Мои URL — просмотреть, переименовать или удалить сохранённые поиски.\n\nИспользуйте только ссылки с домена jp.mercari.com.",
+        "en": "❓ FAQ\n\nThis bot tracks new listings on Mercari Japan.\n\nWhen a new listing appears, the bot sends its title, price, and link.\n\nMain actions:\n\n📁 Manage URLs\nSection for managing your searches. Here you can:\n• ➕ Add URL — add a link or keyword;\n• 📋 My URLs — view, rename or delete saved searches.\n\nUse only links from the jp.mercari.com domain.",
     },
     "url_list": {"ru": "Ваши URL (страница {page}/{total}):", "en": "Your URLs (page {page}/{total}):"},
     "url_list_short": {"ru": "Ваши URL:", "en": "Your URLs:"},
