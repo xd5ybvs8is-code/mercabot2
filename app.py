@@ -75,6 +75,19 @@ async def _poll_invoices_loop(
     logger.info("=" * 50)
     while True:
         try:
+            expired_pending = await subs_storage.get_expired_pending(timeout_minutes=30)
+            if expired_pending:
+                logger.info("⏰ %s expired pending invoice(s) found — cancelling", len(expired_pending))
+            for sub in expired_pending:
+                await subs_storage.cancel_pending(sub.user_id)
+                language = await telegram.get_language(sub.user_id)
+                await telegram.send_message(
+                    sub.user_id,
+                    "⏰ Счёт на оплату отменён.\n\nВремя на оплату истекло (30 минут). Создайте новый счёт."
+                    if language == "ru"
+                    else "⏰ Invoice cancelled.\n\nPayment time expired (30 minutes). Create a new invoice.",
+                )
+
             pending = await subs_storage.get_pending_invoices()
             if pending:
                 invoice_ids = [s.invoice_id for s in pending if s.invoice_id is not None]

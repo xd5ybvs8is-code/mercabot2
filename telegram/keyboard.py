@@ -236,7 +236,14 @@ def build_subscription_inline_keyboard(language: str = "ru") -> dict[str, Any]:
 def build_trial_keyboard(language: str = "ru") -> dict[str, Any]:
     return {"inline_keyboard": [[
         {"text": button_text("trial_button", language), "callback_data": "trial_activate"},
-    ]]} 
+    ]]}
+
+
+def build_invoice_keyboard(pay_url: str, invoice_id: int, language: str = "ru") -> dict[str, Any]:
+    return {"inline_keyboard": [
+        [{"text": button_text("pay_invoice", language), "url": pay_url}],
+        [{"text": button_text("check_payment", language), "callback_data": f"check_payment_{invoice_id}"}],
+    ]}
 
 
 # Множество админских действий — для проверки прав в bot.py.

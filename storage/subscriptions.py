@@ -54,6 +54,7 @@ class SubscriptionStorage:
                 "  plan = excluded.plan,"
                 "  status = 'pending',"
                 "  invoice_id = excluded.invoice_id,"
+                "  created_at = excluded.created_at,"
                 "  updated_at = excluded.updated_at",
                 (user_id, plan, invoice_id, now, now),
             )
@@ -120,6 +121,30 @@ class SubscriptionStorage:
             if sub:
                 result.append(sub)
         return result
+
+    async def get_expired_pending(self, timeout_minutes: int = 30) -> list[SubscriptionRow]:
+        cutoff = int(time.time()) - timeout_minutes * 60
+        cursor = await self._db.conn.execute(
+            "SELECT * FROM subscriptions WHERE status = 'pending' AND created_at <= ?",
+            (cutoff,),
+        )
+        rows = await cursor.fetchall()
+        result: list[SubscriptionRow] = []
+        for r in rows:
+            sub = await self._row_to_subscription(r)
+            if sub:
+                result.append(sub)
+        return result
+
+    async def cancel_pending(self, user_id: str) -> None:
+        now = int(time.time())
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "UPDATE subscriptions SET status = 'expired', updated_at = ? "
+                "WHERE user_id = ? AND status = 'pending'",
+                (now, user_id),
+            )
+        logger.info("⏰ Pending subscription cancelled (expired) for user %s", user_id)
 
     async def get_active_count(self) -> int:
         now = int(time.time())

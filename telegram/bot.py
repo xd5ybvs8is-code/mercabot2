@@ -21,6 +21,7 @@ from telegram.keyboard import (
     build_terms_inline_keyboard,
     build_subscription_inline_keyboard,
     build_trial_keyboard,
+    build_invoice_keyboard,
     LANGUAGE_BUTTON,
     button_text,
 )
@@ -82,6 +83,8 @@ class TelegramNotifier:
         self._awaiting: dict[str, dict[str, str]] = {}
         # message_id последнего inline-сообщения для editMessageText (по chat_id)
         self._inline_msg_ids: dict[str, int] = {}
+        # message_id сообщения со счётом на оплату для editMessageText (по chat_id)
+        self._invoice_msg_ids: dict[str, int] = {}
         # Текущая страница пагинации для списка (по chat_id)
         self._list_pages: dict[str, int] = {}
 
@@ -727,10 +730,73 @@ class TelegramNotifier:
         await self._subs_storage.create(chat_id, f"{plan_days}d", invoice.invoice_id)
         await self._client.answer_callback_query(cb_id)
 
-        await self.send_message(
-            chat_id,
-            tr("invoice_created", language, plan=plan_label, pay_url=escape(invoice.pay_url)),
-        )
+        language = await self._get_language(chat_id)
+        markup = build_invoice_keyboard(invoice.pay_url, invoice.invoice_id, language)
+        payload = {
+            "chat_id": chat_id,
+            "text": tr("invoice_created", language, plan=plan_label),
+            "parse_mode": "HTML",
+            "reply_markup": markup,
+        }
+        result = await self._client.call_api_json("sendMessage", payload)
+        if result and result.get("ok"):
+            msg = result.get("result", {})
+            msg_id = msg.get("message_id")
+            if msg_id:
+                self._invoice_msg_ids[chat_id] = msg_id
+
+    async def _handle_check_payment(
+        self, cb_id: str, invoice_id: int, chat_id: str, msg_id: int | None, language: str,
+    ) -> None:
+        if self._crypto_client is None or self._subs_storage is None:
+            await self._client.answer_callback_query(cb_id, tr("internal_error", language), show_alert=True)
+            return
+
+        sub = await self._subs_storage.get_any(chat_id)
+        if sub is None or sub.status != "pending" or sub.invoice_id != invoice_id:
+            await self._client.answer_callback_query(cb_id, tr("invoice_cancelled", language), show_alert=True)
+            if msg_id:
+                await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled", language))
+            return
+
+        invoices = await self._crypto_client.get_invoices([invoice_id])
+        paid = next((i for i in invoices if i.status == "paid"), None)
+        if paid is not None:
+            plan_days = 7 if sub.plan == "7d" else 30
+            if sub.plan not in ("7d", "30d"):
+                plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+            expires_at = int(time.time()) + plan_days * 86400
+            await self._subs_storage.activate(
+                user_id=chat_id,
+                plan=sub.plan,
+                invoice_id=invoice_id,
+                payment_hash=paid.hash,
+                paid_amount=paid.amount,
+                paid_asset=paid.asset,
+                expires_at=expires_at,
+            )
+            plan_label = "7 дней" if sub.plan == "7d" else f"{sub.plan} дней"
+            if language == "en":
+                plan_label = "7 days" if sub.plan == "7d" else f"{sub.plan} days"
+            from datetime import datetime
+            expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
+            await self._client.answer_callback_query(cb_id)
+            if msg_id:
+                await self._client.edit_message_text(
+                    chat_id, msg_id,
+                    tr("invoice_paid_now", language, plan=plan_label, expires=expires_str),
+                )
+            return
+
+        now = int(time.time())
+        if sub.created_at and (now - sub.created_at) > 30 * 60:
+            await self._subs_storage.cancel_pending(chat_id)
+            await self._client.answer_callback_query(cb_id, tr("invoice_cancelled", language), show_alert=True)
+            if msg_id:
+                await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled", language))
+            return
+
+        await self._client.answer_callback_query(cb_id, tr("invoice_not_paid", language), show_alert=True)
 
     async def is_subscribed(self, chat_id: str) -> bool:
         if self._subs_storage is None:
@@ -783,6 +849,11 @@ class TelegramNotifier:
 
         if data == "trial_activate":
             await self._handle_trial_activation(cb_id, chat_id, msg_id, language)
+            return
+
+        if data.startswith("check_payment_"):
+            invoice_id = int(data.removeprefix("check_payment_"))
+            await self._handle_check_payment(cb_id, invoice_id, chat_id, msg_id, language)
             return
 
         if data == "change_language":

@@ -193,8 +193,8 @@ TEXTS: dict[str, dict[Language, str]] = {
         "en": "💎 An active subscription is required for this action.\n\nPress «💎 Buy Subscription» in the menu.",
     },
     "invoice_created": {
-        "ru": "✅ Счёт на оплату создан.\n\n📦 {plan}\n\n🔗 <a href=\"{pay_url}\">Оплатить через CryptoBot</a>",
-        "en": "✅ Invoice created.\n\n📦 {plan}\n\n🔗 <a href=\"{pay_url}\">Pay via CryptoBot</a>",
+        "ru": "✅ Счёт на оплату создан.\n\n📦 {plan}\n\n⏳ На оплату даётся 30 минут.",
+        "en": "✅ Invoice created.\n\n📦 {plan}\n\n⏳ You have 30 minutes to pay.",
     },
     "invoice_error": {
         "ru": "❌ Не удалось создать счёт. Попробуйте позже.",
@@ -239,6 +239,26 @@ TEXTS: dict[str, dict[Language, str]] = {
     "trial_plan_label": {
         "ru": "Пробный (12 часов)",
         "en": "Trial (12 hours)",
+    },
+    "pay_invoice": {
+        "ru": "💳 Оплатить",
+        "en": "💳 Pay",
+    },
+    "check_payment": {
+        "ru": "🔄 Проверить оплату",
+        "en": "🔄 Check Payment",
+    },
+    "invoice_cancelled": {
+        "ru": "⏰ Счёт на оплату отменён.\n\nВремя на оплату истекло (30 минут). Создайте новый счёт.",
+        "en": "⏰ Invoice cancelled.\n\nPayment time expired (30 minutes). Create a new invoice.",
+    },
+    "invoice_not_paid": {
+        "ru": "⏳ Счёт ещё не оплачен. Попробуйте позже.",
+        "en": "⏳ Invoice not paid yet. Try again later.",
+    },
+    "invoice_paid_now": {
+        "ru": "✅ Оплата подтверждена!\n\n📦 {plan}\n⏰ До: {expires}",
+        "en": "✅ Payment confirmed!\n\n📦 {plan}\n⏰ Until: {expires}",
     },
 }
 
