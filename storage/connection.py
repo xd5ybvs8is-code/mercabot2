@@ -97,6 +97,10 @@ SELECT chat_id, 'ru', CAST(strftime('%s', 'now') AS INTEGER), CAST(strftime('%s'
 FROM notification_outbox;
 """
 
+MIGRATE_DEACTIVATED_AT_SQL = """
+ALTER TABLE search_urls ADD COLUMN deactivated_at INTEGER;
+"""
+
 
 class DatabaseConnection:
     """Manages async SQLite connection and schema creation."""
@@ -139,6 +143,11 @@ class DatabaseConnection:
         await self._conn.execute(CREATE_INDEX_SEEN_ITEMS_SQL)
         logger.debug("  • Creating index: idx_notification_outbox_created_at...")
         await self._conn.execute(CREATE_INDEX_NOTIFICATION_OUTBOX_SQL)
+        logger.debug("  • Running migration: deactivated_at column...")
+        try:
+            await self._conn.execute(MIGRATE_DEACTIVATED_AT_SQL)
+        except Exception:
+            logger.debug("  • deactivated_at column already exists — skipping")
         await self._conn.commit()
         logger.info("=" * 50)
         logger.info("🗄️  DATABASE CONNECTED")

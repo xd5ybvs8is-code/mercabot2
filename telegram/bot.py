@@ -97,11 +97,9 @@ class TelegramNotifier:
 
     async def _on_chat_lost(self, chat_id: str) -> None:
         """Clean up a chat that Telegram reports as permanently gone."""
-        logger.info("🧹 Chat %s lost — removing from database", chat_id)
+        logger.info("🧹 Chat %s lost — deactivating URLs", chat_id)
         if self._url_storage is not None:
             await self._url_storage.deactivate_chat(chat_id)
-        if self._user_storage is not None:
-            await self._user_storage.remove_user(chat_id)
 
     def register_commands(self, handlers: dict[str, CommandHandler]) -> None:
         self._command_handlers.update(handlers)
@@ -296,6 +294,13 @@ class TelegramNotifier:
             return
 
         if text.split(maxsplit=1)[0].lower() == "/start":
+            if self._url_storage is not None:
+                reactivated = await self._url_storage.reactivate_chat(chat_id)
+                if reactivated > 0:
+                    logger.info(
+                        "🔄 /start from returning user %s: reactivated %s URL(s)",
+                        chat_id, reactivated,
+                    )
             await self.send_message(chat_id, tr("welcome", language))
             return
 

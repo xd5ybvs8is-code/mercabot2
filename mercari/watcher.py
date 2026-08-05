@@ -69,9 +69,11 @@ class MercariWatcher:
         return self._paused
 
     _CLEANUP_INTERVAL = 30 * 24 * 3600  # 30 days
+    _DEACTIVATED_CLEANUP_AGE = 90 * 24 * 3600  # 90 days
 
     async def cleanup_loop(self) -> None:
-        """Фоновый цикл: раз в 12 часов удаляет старые записи из items и seen_items."""
+        """Фоновый цикл: раз в 30 дней удаляет старые записи из items и seen_items,
+        а также hard-delete URL-ов, деактивированных дольше 90 дней."""
         logger.info("🧹 Cleanup loop started (interval: %s hours)", self._CLEANUP_INTERVAL // 3600)
         while not self._stop:
             await asyncio.sleep(self._CLEANUP_INTERVAL)
@@ -85,6 +87,14 @@ class MercariWatcher:
                     "🧹 Cleanup: deleted %s items and %s seen_items older than %s hours",
                     items_del, seen_del, self._CLEANUP_INTERVAL // 3600,
                 )
+                urls_del = await self._url_storage.cleanup_deactivated_urls(
+                    self._DEACTIVATED_CLEANUP_AGE
+                )
+                if urls_del > 0:
+                    logger.info(
+                        "🧹 Cleanup: hard-deleted %s deactivated URL(s) older than %s days",
+                        urls_del, self._DEACTIVATED_CLEANUP_AGE // 86400,
+                    )
             except Exception as exc:
                 logger.error("🧹 Cleanup failed: %s", exc)
 

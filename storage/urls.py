@@ -263,10 +263,11 @@ class UrlStorage:
 
     async def deactivate_chat(self, chat_id: str) -> None:
         """Deactivate all URLs and remove pending notifications for a lost chat."""
+        now = int(time.time())
         async with self._db.transaction() as conn:
             await conn.execute(
-                "UPDATE search_urls SET active = 0 WHERE user_chat_id = ?",
-                (chat_id,),
+                "UPDATE search_urls SET active = 0, deactivated_at = ? WHERE user_chat_id = ?",
+                (now, chat_id),
             )
             await conn.execute(
                 "DELETE FROM notification_outbox WHERE chat_id = ?",
@@ -276,6 +277,40 @@ class UrlStorage:
             "🧹 Cleaned up lost chat %s: deactivated URLs, removed pending notifications",
             chat_id,
         )
+
+    async def reactivate_chat(self, chat_id: str) -> int:
+        """Reactivate URLs for a returning user. Returns count of reactivated URLs."""
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "UPDATE search_urls SET active = 1, deactivated_at = NULL WHERE user_chat_id = ? AND active = 0",
+                (chat_id,),
+            )
+            count = cursor.rowcount
+        if count > 0:
+            logger.info(
+                "🔄 Reactivated %s URL(s) for returning user %s",
+                count, chat_id,
+            )
+        return count
+
+    async def cleanup_deactivated_urls(self, max_age_seconds: int) -> int:
+        """Hard-delete URLs deactivated longer than max_age_seconds.
+
+        Returns count of deleted URL rows.
+        """
+        cutoff = int(time.time()) - max_age_seconds
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "DELETE FROM search_urls WHERE active = 0 AND deactivated_at IS NOT NULL AND deactivated_at < ?",
+                (cutoff,),
+            )
+            count = cursor.rowcount
+        if count > 0:
+            logger.info(
+                "🧹 Hard-deleted %s URL(s) deactivated longer than %s days",
+                count, max_age_seconds // 86400,
+            )
+        return count
 
     async def cleanup_old_items(self, max_age_seconds: int) -> tuple[int, int]:
         """Delete records older than max_age_seconds from items and seen_items.
