@@ -53,6 +53,16 @@ class PlategaClient:
             raise RuntimeError("PlategaClient is not started")
         return self._session
 
+    @staticmethod
+    def _parse_details(raw: str | dict) -> tuple[float, str]:
+        """Parse paymentDetails which may be '108.5 RUB' (str) or {'amount': 108.5, 'currency': 'RUB'} (dict)."""
+        if isinstance(raw, dict):
+            return float(raw.get("amount", 0)), raw.get("currency", "")
+        parts = raw.strip().split()
+        if len(parts) >= 2:
+            return float(parts[0]), parts[1]
+        return 0.0, ""
+
     def _headers(self) -> dict[str, str]:
         return {
             "Content-Type": "application/json",
@@ -88,12 +98,12 @@ class PlategaClient:
                 async with self.session.post(url, headers=self._headers(), json=body) as resp:
                     data = await resp.json()
                     if resp.status == 200:
-                        details = data.get("paymentDetails", {})
+                        amount, currency_val = self._parse_details(data.get("paymentDetails", {}))
                         txn = PlategaTransaction(
                             transaction_id=data.get("transactionId", ""),
                             status=data.get("status", ""),
-                            amount=float(details.get("amount", 0)),
-                            currency=details.get("currency", ""),
+                            amount=amount,
+                            currency=currency_val,
                             redirect_url=data.get("redirect", ""),
                             description=data.get("description"),
                             created_at=data.get("createdAt", ""),
@@ -113,20 +123,20 @@ class PlategaClient:
         return None
 
     async def get_payment_status(self, transaction_id: str) -> PlategaTransaction | None:
-        url = f"{PLATEGA_API_URL}/transaction/{transaction_id}/status"
-        logger.debug("📤 Platega GET /transaction/%s/status", transaction_id)
+        url = f"{PLATEGA_API_URL}/transaction/{transaction_id}"
+        logger.debug("📤 Platega GET /transaction/%s", transaction_id)
 
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 async with self.session.get(url, headers=self._headers()) as resp:
                     data = await resp.json()
                     if resp.status == 200:
-                        details = data.get("paymentDetails", {})
+                        amount, currency_val = self._parse_details(data.get("paymentDetails", {}))
                         return PlategaTransaction(
-                            transaction_id=data.get("transactionId", ""),
+                            transaction_id=data.get("id", ""),
                             status=data.get("status", ""),
-                            amount=float(details.get("amount", 0)),
-                            currency=details.get("currency", ""),
+                            amount=amount,
+                            currency=currency_val,
                             redirect_url=data.get("redirect", ""),
                             description=data.get("description"),
                             created_at=data.get("createdAt", ""),
@@ -155,10 +165,14 @@ class PlategaClient:
                     if resp.status == 200:
                         logger.info("🗑️ Platega transaction #%s cancelled", transaction_id)
                         return True
-                    data = await resp.json()
+                    try:
+                        data = await resp.json()
+                    except Exception:
+                        data = {"message": await resp.text()}
                     logger.error(
-                        "❌ Platega cancelTransaction error: HTTP %s",
+                        "❌ Platega cancelTransaction error: HTTP %s — %s",
                         resp.status,
+                        data.get("message", str(data)),
                     )
                     return False
             except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
