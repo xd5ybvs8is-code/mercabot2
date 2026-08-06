@@ -90,7 +90,7 @@ class PlategaClient:
                     if resp.status == 200:
                         details = data.get("paymentDetails", {})
                         txn = PlategaTransaction(
-                            transaction_id=data.get("id", ""),
+                            transaction_id=data.get("transactionId", ""),
                             status=data.get("status", ""),
                             amount=float(details.get("amount", 0)),
                             currency=details.get("currency", ""),
@@ -99,7 +99,6 @@ class PlategaClient:
                             created_at=data.get("createdAt", ""),
                             payload=data.get("payload"),
                         )
-                        logger.info("✅ Platega txn %s created (status=%s)", txn.transaction_id, txn.status)
                         return txn
                     logger.error(
                         "❌ Platega createPayment error: HTTP %s — %s",
@@ -114,8 +113,8 @@ class PlategaClient:
         return None
 
     async def get_payment_status(self, transaction_id: str) -> PlategaTransaction | None:
-        url = f"{PLATEGA_API_URL}/transaction/{transaction_id}"
-        logger.debug("📤 Platega GET /transaction/%s", transaction_id)
+        url = f"{PLATEGA_API_URL}/transaction/{transaction_id}/status"
+        logger.debug("📤 Platega GET /transaction/%s/status", transaction_id)
 
         for attempt in range(1, MAX_RETRIES + 1):
             try:
@@ -123,8 +122,8 @@ class PlategaClient:
                     data = await resp.json()
                     if resp.status == 200:
                         details = data.get("paymentDetails", {})
-                        txn = PlategaTransaction(
-                            transaction_id=data.get("id", ""),
+                        return PlategaTransaction(
+                            transaction_id=data.get("transactionId", ""),
                             status=data.get("status", ""),
                             amount=float(details.get("amount", 0)),
                             currency=details.get("currency", ""),
@@ -133,7 +132,6 @@ class PlategaClient:
                             created_at=data.get("createdAt", ""),
                             payload=data.get("payload"),
                         )
-                        return txn
                     logger.error(
                         "❌ Platega getPaymentStatus error: HTTP %s — %s",
                         resp.status,
