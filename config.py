@@ -20,6 +20,8 @@ class Settings:
     tg_chat_min_interval: float
     admin_user_ids: frozenset[str]
     cryptobot_api_token: str
+    platega_merchant_id: str
+    platega_secret: str
 
 
 def _parse_check_interval(raw: str | None) -> int:
@@ -80,4 +82,6 @@ def load_settings(env_path: Path | None = None) -> Settings:
         tg_chat_min_interval=_parse_float(os.getenv("TG_CHAT_MIN_INTERVAL"), 1.0, "TG_CHAT_MIN_INTERVAL"),
         admin_user_ids=_parse_admin_ids(os.getenv("ADMIN_USER_IDS")),
         cryptobot_api_token=os.getenv("CRYPTOBOT_API_TOKEN", "").strip(),
+        platega_merchant_id=os.getenv("PLATEGA_MERCHANT_ID", "").strip(),
+        platega_secret=os.getenv("PLATEGA_SECRET", "").strip(),
     )

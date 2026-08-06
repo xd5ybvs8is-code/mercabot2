@@ -101,6 +101,10 @@ MIGRATE_DEACTIVATED_AT_SQL = """
 ALTER TABLE search_urls ADD COLUMN deactivated_at INTEGER;
 """
 
+MIGRATE_PAYMENT_GATEWAY_SQL = """
+ALTER TABLE subscriptions ADD COLUMN payment_gateway TEXT DEFAULT 'cryptobot';
+"""
+
 CREATE_TABLE_SUBSCRIPTIONS_SQL = """
 CREATE TABLE IF NOT EXISTS subscriptions (
     user_id       TEXT PRIMARY KEY,
@@ -186,6 +190,11 @@ class DatabaseConnection:
             await self._conn.execute(MIGRATE_DEACTIVATED_AT_SQL)
         except Exception:
             logger.debug("  • deactivated_at column already exists — skipping")
+        logger.debug("  • Running migration: payment_gateway column...")
+        try:
+            await self._conn.execute(MIGRATE_PAYMENT_GATEWAY_SQL)
+        except Exception:
+            logger.debug("  • payment_gateway column already exists — skipping")
         await self._conn.commit()
         logger.info("=" * 50)
         logger.info("🗄️  DATABASE CONNECTED")

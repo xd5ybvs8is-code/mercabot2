@@ -19,6 +19,7 @@ class SubscriptionRow:
     payment_hash: str | None
     paid_amount: str | None
     paid_asset: str | None
+    payment_gateway: str | None
     created_at: int
     updated_at: int
 
@@ -44,21 +45,22 @@ class SubscriptionStorage:
         row = await cursor.fetchone()
         return await self._row_to_subscription(row) if row else None
 
-    async def create(self, user_id: str, plan: str, invoice_id: int) -> None:
+    async def create(self, user_id: str, plan: str, invoice_id: int, payment_gateway: str = "cryptobot") -> None:
         now = int(time.time())
         async with self._db.transaction() as conn:
             await conn.execute(
-                "INSERT INTO subscriptions (user_id, plan, status, invoice_id, created_at, updated_at) "
-                "VALUES (?, ?, 'pending', ?, ?, ?) "
+                "INSERT INTO subscriptions (user_id, plan, status, invoice_id, payment_gateway, created_at, updated_at) "
+                "VALUES (?, ?, 'pending', ?, ?, ?, ?) "
                 "ON CONFLICT(user_id) DO UPDATE SET "
                 "  plan = excluded.plan,"
                 "  status = 'pending',"
                 "  invoice_id = excluded.invoice_id,"
+                "  payment_gateway = excluded.payment_gateway,"
                 "  created_at = excluded.created_at,"
                 "  updated_at = excluded.updated_at",
-                (user_id, plan, invoice_id, now, now),
+                (user_id, plan, invoice_id, payment_gateway, now, now),
             )
-        logger.info("📝 Subscription pending for user %s (plan=%s, invoice=%s)", user_id, plan, invoice_id)
+        logger.info("📝 Subscription pending for user %s (plan=%s, invoice=%s, gateway=%s)", user_id, plan, invoice_id, payment_gateway)
 
     async def activate(
         self,
@@ -145,6 +147,16 @@ class SubscriptionStorage:
                 (now, user_id),
             )
         logger.info("⏰ Pending subscription cancelled (expired) for user %s", user_id)
+
+    async def set_payment_hash(self, user_id: str, payment_hash: str) -> None:
+        now = int(time.time())
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "UPDATE subscriptions SET payment_hash = ?, updated_at = ? "
+                "WHERE user_id = ? AND status = 'pending'",
+                (payment_hash, now, user_id),
+            )
+        logger.info("🔑 Payment hash set for user %s: %s", user_id, payment_hash)
 
     async def get_active_count(self) -> int:
         now = int(time.time())
@@ -240,6 +252,7 @@ class SubscriptionStorage:
             payment_hash=row["payment_hash"],
             paid_amount=row["paid_amount"],
             paid_asset=row["paid_asset"],
+            payment_gateway=row["payment_gateway"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

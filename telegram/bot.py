@@ -20,8 +20,11 @@ from telegram.keyboard import (
     build_help_inline_keyboard,
     build_terms_inline_keyboard,
     build_subscription_inline_keyboard,
+    build_sbp_subscription_inline_keyboard,
     build_trial_keyboard,
     build_invoice_keyboard,
+    build_sbp_invoice_keyboard,
+    build_payment_method_keyboard,
     LANGUAGE_BUTTON,
     button_text,
 )
@@ -36,6 +39,7 @@ if TYPE_CHECKING:
     from storage.urls import UrlStorage
     from storage.subscriptions import SubscriptionStorage
     from crypto.client import CryptoPayClient
+    from platega.client import PlategaClient
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +64,7 @@ class TelegramNotifier:
         user_storage: UserStorage | None = None,
         subs_storage: "SubscriptionStorage | None" = None,
         crypto_client: "CryptoPayClient | None" = None,
+        platega_client: "PlategaClient | None" = None,
     ) -> None:
         self._client = TelegramClient(token)
         self._admin_user_ids = admin_user_ids
@@ -67,6 +72,7 @@ class TelegramNotifier:
         self._user_storage = user_storage
         self._subs_storage = subs_storage
         self._crypto_client = crypto_client
+        self._platega_client = platega_client
         self._sender = MessageSender(
             self._client,
             rate_per_sec=rate_per_sec,
@@ -89,6 +95,8 @@ class TelegramNotifier:
         self._list_pages: dict[str, int] = {}
         # message_id welcome-сообщения с кнопкой пробного доступа (по chat_id)
         self._trial_msg_ids: dict[str, int] = {}
+        # Выбранный способ оплаты (по chat_id) — "cryptobot" или "platega"
+        self._payment_gateways: dict[str, str] = {}
 
     async def start(self) -> None:
         logger.info("⏳ Starting Telegram bot...")
@@ -525,7 +533,16 @@ class TelegramNotifier:
 
         if action == "__await_subscription__":
             logger.info("   → User %s pressed 'Subscription' button", chat_id)
-            await self._show_subscription(chat_id)
+            has_crypto = self._crypto_client is not None
+            has_platega = self._platega_client is not None
+            if has_crypto and has_platega:
+                await self._show_payment_method_selection(chat_id)
+            elif has_platega:
+                self._payment_gateways[chat_id] = "platega"
+                await self._show_subscription(chat_id)
+            else:
+                self._payment_gateways.pop(chat_id, None)
+                await self._show_subscription(chat_id)
             return
 
         if action == "__url_management__":
@@ -657,8 +674,31 @@ class TelegramNotifier:
                 chat_id, msg_id, terms_text, reply_markup=markup,
             )
 
+    async def _show_payment_method_selection(self, chat_id: str) -> None:
+        language = await self._get_language(chat_id)
+        markup = build_payment_method_keyboard(language)
+        payload = {
+            "chat_id": chat_id,
+            "text": tr("choose_payment_method", language),
+            "parse_mode": "HTML",
+            "reply_markup": markup,
+        }
+        result = await self._client.call_api_json("sendMessage", payload)
+        if result and result.get("ok"):
+            msg = result.get("result", {})
+            msg_id = msg.get("message_id")
+            if msg_id:
+                self._inline_msg_ids[chat_id] = msg_id
+
     async def _show_subscription(self, chat_id: str) -> None:
         language = await self._get_language(chat_id)
+        gateway = self._payment_gateways.get(chat_id)
+        has_crypto = self._crypto_client is not None
+        has_platega = self._platega_client is not None
+        if not gateway and has_platega and not has_crypto:
+            gateway = "platega"
+        if not gateway and has_crypto:
+            gateway = "cryptobot"
         if self._subs_storage is not None:
             sub = await self._subs_storage.get_any(chat_id)
             if sub is not None and sub.status == "active" and sub.expires_at and sub.expires_at > int(time.time()):
@@ -676,7 +716,10 @@ class TelegramNotifier:
                     f"{tr('subscription_status_active', language, expires=expires_str, plan=plan_label)}\n\n"
                     f"{tr('subscription_extend_btn', language)}"
                 )
-                markup = build_subscription_inline_keyboard(language)
+                if self._payment_gateways.get(chat_id) == "platega":
+                    markup = build_sbp_subscription_inline_keyboard(language)
+                else:
+                    markup = build_subscription_inline_keyboard(language)
                 payload = {
                     "chat_id": chat_id,
                     "text": status_text,
@@ -691,7 +734,53 @@ class TelegramNotifier:
                         self._inline_msg_ids[chat_id] = msg_id
                 return
             elif sub is not None and sub.status == "pending":
-                if self._crypto_client is not None and sub.invoice_id is not None:
+                if sub.payment_gateway == "platega" and self._platega_client is not None and sub.payment_hash is not None:
+                    txn = await self._platega_client.get_payment_status(sub.payment_hash)
+                    if txn is not None and txn.status == "CONFIRMED":
+                        plan_days = 7 if sub.plan == "7d" else 30
+                        if sub.plan not in ("7d", "30d"):
+                            plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+                        expires_at = int(time.time()) + plan_days * 86400
+                        await self._subs_storage.activate(
+                            user_id=chat_id,
+                            plan=sub.plan,
+                            invoice_id=sub.invoice_id or 0,
+                            payment_hash=sub.payment_hash,
+                            paid_amount=str(txn.amount),
+                            paid_asset=txn.currency,
+                            expires_at=expires_at,
+                        )
+                        plan_label = "7 дней" if sub.plan == "7d" else f"{sub.plan} дней"
+                        if language == "en":
+                            plan_label = "7 days" if sub.plan == "7d" else f"{sub.plan} days"
+                        from datetime import datetime as _dt_sbp
+                        expires_str = _dt_sbp.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
+                        status_text = tr("sbp_paid_now", language, plan=plan_label, expires=expires_str)
+                        await self.send_message(chat_id, status_text)
+                        return
+                    else:
+                        now = int(time.time())
+                        if sub.created_at and (now - sub.created_at) > 30 * 60:
+                            await self._subs_storage.cancel_pending(chat_id)
+                        else:
+                            markup = build_sbp_invoice_keyboard(
+                                txn.redirect_url if txn else "",
+                                sub.payment_hash,
+                                language,
+                            )
+                            status_text = (
+                                f"{tr('subscription_status_title', language)}\n\n"
+                                f"{tr('subscription_status_pending', language)}"
+                            )
+                            payload = {
+                                "chat_id": chat_id,
+                                "text": status_text,
+                                "parse_mode": "HTML",
+                                "reply_markup": markup,
+                            }
+                            await self._client.call_api_json("sendMessage", payload)
+                            return
+                elif self._crypto_client is not None and sub.invoice_id is not None:
                     from datetime import datetime as _dt
                     invoices = await self._crypto_client.get_invoices([sub.invoice_id])
                     if invoices:
@@ -755,7 +844,10 @@ class TelegramNotifier:
                     return
 
         sub_text = tr("subscription_title", language)
-        markup = build_subscription_inline_keyboard(language)
+        if gateway == "platega":
+            markup = build_sbp_subscription_inline_keyboard(language)
+        else:
+            markup = build_subscription_inline_keyboard(language)
         payload = {
             "chat_id": chat_id,
             "text": sub_text,
@@ -932,6 +1024,125 @@ class TelegramNotifier:
         if msg_id:
             await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled_by_user", language))
 
+    async def _handle_sbp_purchase(
+        self, cb_id: str, plan: str, chat_id: str, language: str,
+    ) -> None:
+        if self._platega_client is None or self._subs_storage is None:
+            await self._client.answer_callback_query(cb_id, tr("internal_error", language), show_alert=True)
+            return
+
+        plan_days = 7 if plan == "sbp_7d" else 30
+        plan_price = 100.0 if plan == "sbp_7d" else 300.0
+        plan_label = tr(plan.replace("sbp", "sub"), language)
+
+        import json as _json
+        payload = _json.dumps({"plan": plan_days, "user_id": chat_id})
+
+        txn = await self._platega_client.create_payment(
+            amount=plan_price,
+            currency="RUB",
+            description=f"Подписка Mercari Bot — {plan_days} дней",
+            payload=payload,
+        )
+
+        if txn is None:
+            await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
+            return
+
+        await self._subs_storage.create(
+            chat_id, f"{plan_days}d", 0,
+            payment_gateway="platega",
+        )
+        await self._subs_storage.set_payment_hash(chat_id, txn.transaction_id)
+        await self._client.answer_callback_query(cb_id)
+
+        language = await self._get_language(chat_id)
+        markup = build_sbp_invoice_keyboard(txn.redirect_url, txn.transaction_id, language)
+        msg_payload = {
+            "chat_id": chat_id,
+            "text": tr("sbp_invoice_created", language, plan=plan_label),
+            "parse_mode": "HTML",
+            "reply_markup": markup,
+        }
+        result = await self._client.call_api_json("sendMessage", msg_payload)
+        if result and result.get("ok"):
+            msg = result.get("result", {})
+            msg_id = msg.get("message_id")
+            if msg_id:
+                self._invoice_msg_ids[chat_id] = msg_id
+
+    async def _handle_check_sbp(
+        self, cb_id: str, txn_id: str, chat_id: str, msg_id: int | None, language: str,
+    ) -> None:
+        if self._platega_client is None or self._subs_storage is None:
+            await self._client.answer_callback_query(cb_id, tr("internal_error", language), show_alert=True)
+            return
+
+        sub = await self._subs_storage.get_any(chat_id)
+        if sub is None or sub.status != "pending" or sub.payment_hash != txn_id:
+            await self._client.answer_callback_query(cb_id, tr("invoice_cancelled", language), show_alert=True)
+            if msg_id:
+                await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled", language))
+            return
+
+        txn = await self._platega_client.get_payment_status(txn_id)
+        if txn is not None and txn.status == "CONFIRMED":
+            plan_days = 7 if sub.plan == "7d" else 30
+            if sub.plan not in ("7d", "30d"):
+                plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+            expires_at = int(time.time()) + plan_days * 86400
+            await self._subs_storage.activate(
+                user_id=chat_id,
+                plan=sub.plan,
+                invoice_id=sub.invoice_id or 0,
+                payment_hash=txn_id,
+                paid_amount=str(txn.amount),
+                paid_asset=txn.currency,
+                expires_at=expires_at,
+            )
+            plan_label = "7 дней" if sub.plan == "7d" else f"{sub.plan} дней"
+            if language == "en":
+                plan_label = "7 days" if sub.plan == "7d" else f"{sub.plan} days"
+            from datetime import datetime
+            expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
+            await self._client.answer_callback_query(cb_id)
+            if msg_id:
+                await self._client.edit_message_text(
+                    chat_id, msg_id,
+                    tr("sbp_paid_now", language, plan=plan_label, expires=expires_str),
+                )
+            return
+
+        now = int(time.time())
+        if sub.created_at and (now - sub.created_at) > 30 * 60:
+            await self._subs_storage.cancel_pending(chat_id)
+            await self._client.answer_callback_query(cb_id, tr("invoice_cancelled", language), show_alert=True)
+            if msg_id:
+                await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled", language))
+            return
+
+        await self._client.answer_callback_query(cb_id, tr("invoice_not_paid", language), show_alert=True)
+
+    async def _handle_cancel_sbp(
+        self, cb_id: str, txn_id: str, chat_id: str, msg_id: int | None, language: str,
+    ) -> None:
+        if self._platega_client is None or self._subs_storage is None:
+            await self._client.answer_callback_query(cb_id, tr("internal_error", language), show_alert=True)
+            return
+
+        sub = await self._subs_storage.get_any(chat_id)
+        if sub is None or sub.status != "pending" or sub.payment_hash != txn_id:
+            await self._client.answer_callback_query(cb_id, tr("invoice_cancelled", language), show_alert=True)
+            if msg_id:
+                await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled", language))
+            return
+
+        await self._platega_client.cancel_transaction(txn_id)
+        await self._subs_storage.cancel_pending(chat_id)
+        await self._client.answer_callback_query(cb_id)
+        if msg_id:
+            await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled_by_user", language))
+
     async def is_subscribed(self, chat_id: str) -> bool:
         if self._subs_storage is None:
             return True
@@ -985,6 +1196,19 @@ class TelegramNotifier:
             await self._handle_subscription_purchase(cb_id, data, chat_id, language)
             return
 
+        if data in ("sbp_7d", "sbp_30d"):
+            await self._handle_sbp_purchase(cb_id, data, chat_id, language)
+            return
+
+        if data in ("paymethod_sbp", "paymethod_crypto"):
+            if data == "paymethod_sbp":
+                self._payment_gateways[chat_id] = "platega"
+            else:
+                self._payment_gateways[chat_id] = "cryptobot"
+            await self._show_subscription(chat_id)
+            await self._client.answer_callback_query(cb_id)
+            return
+
         if data == "trial_activate":
             await self._handle_trial_activation(cb_id, chat_id, msg_id, language)
             return
@@ -994,9 +1218,19 @@ class TelegramNotifier:
             await self._handle_check_payment(cb_id, invoice_id, chat_id, msg_id, language)
             return
 
+        if data.startswith("check_sbp_"):
+            txn_id = data.removeprefix("check_sbp_")
+            await self._handle_check_sbp(cb_id, txn_id, chat_id, msg_id, language)
+            return
+
         if data.startswith("cancel_invoice_"):
             invoice_id = int(data.removeprefix("cancel_invoice_"))
             await self._handle_cancel_invoice(cb_id, invoice_id, chat_id, msg_id, language)
+            return
+
+        if data.startswith("cancel_sbp_"):
+            txn_id = data.removeprefix("cancel_sbp_")
+            await self._handle_cancel_sbp(cb_id, txn_id, chat_id, msg_id, language)
             return
 
         if data == "change_language":

@@ -282,6 +282,13 @@ def build_subscription_inline_keyboard(language: str = "ru") -> dict[str, Any]:
     ]]}
 
 
+def build_sbp_subscription_inline_keyboard(language: str = "ru") -> dict[str, Any]:
+    return {"inline_keyboard": [[
+        {"text": button_text("sbp_plan_7d", language), "callback_data": "sbp_7d"},
+        {"text": button_text("sbp_plan_30d", language), "callback_data": "sbp_30d"},
+    ]]}
+
+
 def build_trial_keyboard(language: str = "ru") -> dict[str, Any]:
     return {"inline_keyboard": [[
         {"text": button_text("trial_button", language), "callback_data": "trial_activate"},
@@ -293,6 +300,21 @@ def build_invoice_keyboard(pay_url: str, invoice_id: int, language: str = "ru") 
         [{"text": button_text("pay_invoice", language), "url": pay_url}],
         [{"text": button_text("check_payment", language), "callback_data": f"check_payment_{invoice_id}"}],
         [{"text": button_text("cancel_invoice", language), "callback_data": f"cancel_invoice_{invoice_id}"}],
+    ]}
+
+
+def build_sbp_invoice_keyboard(pay_url: str, txn_id: str, language: str = "ru") -> dict[str, Any]:
+    return {"inline_keyboard": [
+        [{"text": button_text("pay_invoice", language), "url": pay_url}],
+        [{"text": button_text("check_payment", language), "callback_data": f"check_sbp_{txn_id}"}],
+        [{"text": button_text("cancel_invoice", language), "callback_data": f"cancel_sbp_{txn_id}"}],
+    ]}
+
+
+def build_payment_method_keyboard(language: str = "ru") -> dict[str, Any]:
+    return {"inline_keyboard": [
+        [{"text": button_text("paymethod_sbp", language), "callback_data": "paymethod_sbp"}],
+        [{"text": button_text("paymethod_crypto", language), "callback_data": "paymethod_crypto"}],
     ]}
 
 

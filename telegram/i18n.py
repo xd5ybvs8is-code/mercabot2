@@ -250,6 +250,26 @@ TEXTS: dict[str, dict[Language, str]] = {
         "ru": "💳 Оплатить",
         "en": "💳 Pay",
     },
+    "paymethod_sbp": {
+        "ru": "💳 СБП (QR-код)",
+        "en": "💳 SBP (QR code)",
+    },
+    "paymethod_crypto": {
+        "ru": "💎 USDT (CryptoBot)",
+        "en": "💎 USDT (CryptoBot)",
+    },
+    "choose_payment_method": {
+        "ru": "💎 <b>Выберите способ оплаты:</b>",
+        "en": "💎 <b>Choose payment method:</b>",
+    },
+    "sbp_plan_7d": {
+        "ru": "7 дней — 100₽ (СБП)",
+        "en": "7 days — 100₽ (SBP)",
+    },
+    "sbp_plan_30d": {
+        "ru": "30 дней — 300₽ (СБП)",
+        "en": "30 days — 300₽ (SBP)",
+    },
     "check_payment": {
         "ru": "🔄 Проверить оплату",
         "en": "🔄 Check Payment",
@@ -321,6 +341,14 @@ TEXTS: dict[str, dict[Language, str]] = {
     "whitelist_placeholder": {
         "ru": "Введите Telegram user_id...",
         "en": "Enter Telegram user_id...",
+    },
+    "sbp_invoice_created": {
+        "ru": "✅ Ссылка на оплату через СБП создана.\n\n📦 {plan}\n\n⏳ На оплату даётся 30 минут.\n\nПерейдите по кнопке ниже для оплаты через QR-код.",
+        "en": "✅ SBP payment link created.\n\n📦 {plan}\n\n⏳ You have 30 minutes to pay.\n\nFollow the button below to pay via QR code.",
+    },
+    "sbp_paid_now": {
+        "ru": "✅ Оплата через СБП подтверждена!\n\n📦 {plan}\n⏰ До: {expires}",
+        "en": "✅ SBP payment confirmed!\n\n📦 {plan}\n⏰ Until: {expires}",
     },
 }
 

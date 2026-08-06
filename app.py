@@ -8,6 +8,7 @@ from pathlib import Path
 
 from config import load_settings
 from crypto.client import CryptoPayClient
+from platega.client import PlategaClient
 from mercari.client import MercariClient
 from mercari.devices import DeviceRegistry
 from mercari.watcher import MercariWatcher
@@ -149,6 +150,66 @@ async def _expire_subscriptions_loop(
         await asyncio.sleep(interval)
 
 
+async def _poll_platega_loop(
+    platega_client: PlategaClient,
+    subs_storage: SubscriptionStorage,
+    telegram: TelegramNotifier,
+    interval: float = 30.0,
+) -> None:
+    """Periodically check pending Platega payments and activate paid subscriptions."""
+    logger = logging.getLogger(__name__)
+    logger.info("=" * 50)
+    logger.info("🔄 PLATEGA PAYMENT POLLING LOOP STARTED")
+    logger.info("   Interval: %s seconds", interval)
+    logger.info("=" * 50)
+    while True:
+        try:
+            expired_pending = await subs_storage.get_expired_pending(timeout_minutes=30)
+            for sub in expired_pending:
+                if sub.payment_gateway != "platega":
+                    continue
+                await subs_storage.cancel_pending(sub.user_id)
+                language = await telegram.get_language(sub.user_id)
+                await telegram.send_message(
+                    sub.user_id,
+                    "⏰ Ссылка на оплату истекла.\n\nВремя на оплату истекло (30 минут). Создайте новый счёт."
+                    if language == "ru"
+                    else "⏰ Payment link expired.\n\nPayment time expired (30 minutes). Create a new invoice.",
+                )
+
+            pending = await subs_storage.get_pending_invoices()
+            for sub in pending:
+                if sub.payment_gateway != "platega":
+                    continue
+                if sub.payment_hash is None:
+                    continue
+                txn = await platega_client.get_payment_status(sub.payment_hash)
+                if txn is not None and txn.status == "CONFIRMED":
+                    plan_days = 7 if sub.plan == "7d" else 30
+                    if sub.plan not in ("7d", "30d"):
+                        plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+                    expires_at = int(time.time()) + plan_days * 86400
+                    await subs_storage.activate(
+                        user_id=sub.user_id,
+                        plan=sub.plan,
+                        invoice_id=sub.invoice_id or 0,
+                        payment_hash=sub.payment_hash,
+                        paid_amount=str(txn.amount),
+                        paid_asset=txn.currency,
+                        expires_at=expires_at,
+                    )
+                    language = await telegram.get_language(sub.user_id)
+                    from datetime import datetime
+                    expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
+                    await telegram.send_message(
+                        sub.user_id,
+                        f"✅ Оплата через СБП подтверждена!\n\n📦 {sub.plan} дней\n⏰ До: {expires_str}",
+                    )
+        except Exception:
+            logger.exception("Platega payment polling error")
+        await asyncio.sleep(interval)
+
+
 async def main() -> None:
     setup_logging()
     logger = logging.getLogger(__name__)
@@ -174,6 +235,7 @@ async def main() -> None:
     logger.info("   TG send rate: %s msg/sec (chat interval: %ss)", settings.tg_send_rate, settings.tg_chat_min_interval)
     logger.info("   Admin users: %s (%s)", len(settings.admin_user_ids), sorted(settings.admin_user_ids) or "none")
     logger.info("   CryptoBot token: %s...%s", settings.cryptobot_api_token[:5], settings.cryptobot_api_token[-5:] if len(settings.cryptobot_api_token) > 5 else "N/A")
+    logger.info("   Platega merchant: %s...", settings.platega_merchant_id[:8] if settings.platega_merchant_id else "N/A")
 
     # ── 2. Database ──────────────────────────────────────────────
     logger.info("─" * 40)
@@ -224,7 +286,18 @@ async def main() -> None:
         await crypto_client.start()
         logger.info("✅ CryptoBot client started")
     else:
-        logger.info("⚠️  CRYPTOBOT_API_TOKEN is empty — subscription payments disabled")
+        logger.info("⚠️  CRYPTOBOT_API_TOKEN is empty — CryptoBot payments disabled")
+
+    # ── 5c. Platega Client ──────────────────────────────────────
+    logger.info("─" * 40)
+    logger.info("STEP 5c/7: Starting Platega client...")
+    platega_client: PlategaClient | None = None
+    if settings.platega_merchant_id and settings.platega_secret:
+        platega_client = PlategaClient(settings.platega_merchant_id, settings.platega_secret)
+        await platega_client.start()
+        logger.info("✅ Platega client started (merchant %s...)", settings.platega_merchant_id[:8])
+    else:
+        logger.info("⚠️  PLATEGA_MERCHANT_ID/PLATEGA_SECRET empty — Platega payments disabled")
 
     # ── 6. Telegram Bot ─────────────────────────────────────────
     logger.info("─" * 40)
@@ -238,6 +311,7 @@ async def main() -> None:
         user_storage=user_storage,
         subs_storage=subs_storage,
         crypto_client=crypto_client,
+        platega_client=platega_client,
     )
     watcher = MercariWatcher(settings, url_storage, telegram, client, devices, subs_storage, settings.admin_user_ids)
 
@@ -262,6 +336,7 @@ async def main() -> None:
 
     # ── Background: invoice polling ──────────────────────────────
     invoice_poll_task: asyncio.Task[None] | None = None
+    platega_poll_task: asyncio.Task[None] | None = None
     expiry_task: asyncio.Task[None] | None = None
     if crypto_client is not None:
         invoice_poll_task = asyncio.create_task(
@@ -272,6 +347,17 @@ async def main() -> None:
             _expire_subscriptions_loop(subs_storage, url_storage),
         )
         logger.info("✅ Subscription expiry checker started (interval: 10min)")
+    elif platega_client is not None:
+        expiry_task = asyncio.create_task(
+            _expire_subscriptions_loop(subs_storage, url_storage),
+        )
+        logger.info("✅ Subscription expiry checker started (interval: 10min)")
+
+    if platega_client is not None:
+        platega_poll_task = asyncio.create_task(
+            _poll_platega_loop(platega_client, subs_storage, telegram),
+        )
+        logger.info("✅ Platega payment polling started (interval: 30s)")
 
     # ── Start notification ──────────────────────────────────────
     logger.info("=" * 50)
@@ -324,6 +410,19 @@ async def main() -> None:
             logger.info("  • Closing CryptoBot client...")
             await crypto_client.close()
             logger.info("  ✅ CryptoBot client closed")
+
+        if platega_poll_task:
+            logger.info("  • Stopping Platega payment polling...")
+            platega_poll_task.cancel()
+            try:
+                await platega_poll_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("  ✅ Platega payment polling stopped")
+        if platega_client:
+            logger.info("  • Closing Platega client...")
+            await platega_client.close()
+            logger.info("  ✅ Platega client closed")
 
         logger.info("  • Closing Mercari client...")
         await client.aclose()
