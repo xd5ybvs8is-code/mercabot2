@@ -25,6 +25,7 @@ from telegram.keyboard import (
     build_invoice_keyboard,
     build_sbp_invoice_keyboard,
     build_payment_method_keyboard,
+    build_plan_selection_keyboard,
     LANGUAGE_BUTTON,
     button_text,
 )
@@ -97,6 +98,7 @@ class TelegramNotifier:
         self._trial_msg_ids: dict[str, int] = {}
         # Выбранный способ оплаты (по chat_id) — "cryptobot" или "platega"
         self._payment_gateways: dict[str, str] = {}
+        self._selected_plans: dict[str, str] = {}
 
     async def start(self) -> None:
         logger.info("⏳ Starting Telegram bot...")
@@ -536,7 +538,7 @@ class TelegramNotifier:
             has_crypto = self._crypto_client is not None
             has_platega = self._platega_client is not None
             if has_crypto and has_platega:
-                await self._show_payment_method_selection(chat_id)
+                await self._show_plan_selection(chat_id)
             elif has_platega:
                 self._payment_gateways[chat_id] = "platega"
                 await self._show_subscription(chat_id)
@@ -673,6 +675,22 @@ class TelegramNotifier:
             await self._client.edit_message_text(
                 chat_id, msg_id, terms_text, reply_markup=markup,
             )
+
+    async def _show_plan_selection(self, chat_id: str) -> None:
+        language = await self._get_language(chat_id)
+        markup = build_plan_selection_keyboard(language)
+        payload = {
+            "chat_id": chat_id,
+            "text": tr("subscription_title", language),
+            "parse_mode": "HTML",
+            "reply_markup": markup,
+        }
+        result = await self._client.call_api_json("sendMessage", payload)
+        if result and result.get("ok"):
+            msg = result.get("result", {})
+            msg_id = msg.get("message_id")
+            if msg_id:
+                self._inline_msg_ids[chat_id] = msg_id
 
     async def _show_payment_method_selection(self, chat_id: str) -> None:
         language = await self._get_language(chat_id)
@@ -1192,6 +1210,22 @@ class TelegramNotifier:
             await self._client.answer_callback_query(cb_id)
             return
 
+        if data in ("plan_7d", "plan_30d"):
+            self._selected_plans[chat_id] = data
+            has_crypto = self._crypto_client is not None
+            has_platega = self._platega_client is not None
+            if has_crypto and has_platega:
+                await self._show_payment_method_selection(chat_id)
+                await self._client.answer_callback_query(cb_id)
+            elif has_platega:
+                self._payment_gateways[chat_id] = "platega"
+                mapped = data.replace("plan", "sbp")
+                await self._handle_sbp_purchase(cb_id, mapped, chat_id, language)
+            else:
+                mapped = data.replace("plan", "sub")
+                await self._handle_subscription_purchase(cb_id, mapped, chat_id, language)
+            return
+
         if data in ("sub_7d", "sub_30d"):
             await self._handle_subscription_purchase(cb_id, data, chat_id, language)
             return
@@ -1205,8 +1239,17 @@ class TelegramNotifier:
                 self._payment_gateways[chat_id] = "platega"
             else:
                 self._payment_gateways[chat_id] = "cryptobot"
-            await self._show_subscription(chat_id)
-            await self._client.answer_callback_query(cb_id)
+            plan = self._selected_plans.pop(chat_id, None)
+            if plan is not None:
+                if self._payment_gateways.get(chat_id) == "platega":
+                    mapped = plan.replace("plan", "sbp")
+                    await self._handle_sbp_purchase(cb_id, mapped, chat_id, language)
+                else:
+                    mapped = plan.replace("plan", "sub")
+                    await self._handle_subscription_purchase(cb_id, mapped, chat_id, language)
+            else:
+                await self._show_subscription(chat_id)
+                await self._client.answer_callback_query(cb_id)
             return
 
         if data == "trial_activate":

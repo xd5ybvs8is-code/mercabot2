@@ -188,6 +188,8 @@ TEXTS: dict[str, dict[Language, str]] = {
         "ru": "💎 Подписка Mercari jp Parser\n\nПодписка открывает доступ к отслеживанию новых объявлений на Mercari Japan:\n\n• Мгновенные уведомления о новых товарах\n• Отслеживание по ключевым словам и ссылкам\n\nВыберите срок подписки:",
         "en": "💎 Mercari jp Parser Subscription\n\nSubscription gives access to tracking new listings on Mercari Japan:\n\n• Instant notifications for new items\n• Tracking by keywords and links\n\nChoose a subscription period:",
     },
+    "plan_7d": {"ru": "7 дней — 100₽", "en": "7 days — 100₽"},
+    "plan_30d": {"ru": "30 дней — 300₽", "en": "30 days — 300₽"},
     "sub_7d": {"ru": "7 дней — 100₽", "en": "7 days — 100₽"},
     "sub_30d": {"ru": "30 дней — 300₽", "en": "30 days — 300₽"},
     "no_subscription": {

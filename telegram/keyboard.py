@@ -311,6 +311,13 @@ def build_sbp_invoice_keyboard(pay_url: str, txn_id: str, language: str = "ru") 
     ]}
 
 
+def build_plan_selection_keyboard(language: str = "ru") -> dict[str, Any]:
+    return {"inline_keyboard": [[
+        {"text": button_text("plan_7d", language), "callback_data": "plan_7d"},
+        {"text": button_text("plan_30d", language), "callback_data": "plan_30d"},
+    ]]}
+
+
 def build_payment_method_keyboard(language: str = "ru") -> dict[str, Any]:
     return {"inline_keyboard": [
         [{"text": button_text("paymethod_sbp", language), "callback_data": "paymethod_sbp"}],
