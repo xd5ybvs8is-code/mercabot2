@@ -755,9 +755,7 @@ class TelegramNotifier:
                 if sub.payment_gateway == "platega" and self._platega_client is not None and sub.payment_hash is not None:
                     txn = await self._platega_client.get_payment_status(sub.payment_hash)
                     if txn is not None and txn.status == "CONFIRMED":
-                        plan_days = 7 if sub.plan == "7d" else 30
-                        if sub.plan not in ("7d", "30d"):
-                            plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+                        plan_days = self._subs_storage.get_plan_days(sub.plan)
                         expires_at = int(time.time()) + plan_days * 86400
                         await self._subs_storage.activate(
                             user_id=chat_id,
@@ -804,9 +802,7 @@ class TelegramNotifier:
                     if invoices:
                         inv = invoices[0]
                         if inv.status == "paid":
-                            plan_days = 7 if sub.plan == "7d" else 30
-                            if sub.plan not in ("7d", "30d"):
-                                plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+                            plan_days = self._subs_storage.get_plan_days(sub.plan)
                             expires_at = int(time.time()) + plan_days * 86400
                             await self._subs_storage.activate(
                                 user_id=chat_id,
@@ -889,6 +885,12 @@ class TelegramNotifier:
             )
             return
 
+        if await self._subs_storage.is_subscribed(chat_id):
+            await self._client.answer_callback_query(
+                cb_id, tr("trial_already_used", language), show_alert=True,
+            )
+            return
+
         if await self._subs_storage.has_used_trial(chat_id):
             await self._client.answer_callback_query(
                 cb_id, tr("trial_already_used", language), show_alert=True,
@@ -951,6 +953,11 @@ class TelegramNotifier:
             )
             return
 
+        existing = await self._subs_storage.get_any(chat_id)
+        if existing is not None and existing.status == "pending" and existing.invoice_id:
+            await self._crypto_client.delete_invoice(existing.invoice_id)
+            logger.info("🗑️ Cancelled old CryptoBot invoice #%s for user %s", existing.invoice_id, chat_id)
+
         await self._subs_storage.create(chat_id, f"{plan_days}d", invoice.invoice_id)
         await self._client.answer_callback_query(cb_id)
 
@@ -986,9 +993,7 @@ class TelegramNotifier:
         invoices = await self._crypto_client.get_invoices([invoice_id])
         paid = next((i for i in invoices if i.status == "paid"), None)
         if paid is not None:
-            plan_days = 7 if sub.plan == "7d" else 30
-            if sub.plan not in ("7d", "30d"):
-                plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+            plan_days = self._subs_storage.get_plan_days(sub.plan)
             expires_at = int(time.time()) + plan_days * 86400
             await self._subs_storage.activate(
                 user_id=chat_id,
@@ -1067,6 +1072,11 @@ class TelegramNotifier:
             await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
             return
 
+        existing = await self._subs_storage.get_any(chat_id)
+        if existing is not None and existing.status == "pending" and existing.payment_hash:
+            await self._platega_client.cancel_transaction(existing.payment_hash)
+            logger.info("🗑️ Cancelled old Platega transaction %s for user %s", existing.payment_hash, chat_id)
+
         await self._subs_storage.create(
             chat_id, f"{plan_days}d", 0,
             payment_gateway="platega",
@@ -1105,9 +1115,7 @@ class TelegramNotifier:
 
         txn = await self._platega_client.get_payment_status(txn_id)
         if txn is not None and txn.status == "CONFIRMED":
-            plan_days = 7 if sub.plan == "7d" else 30
-            if sub.plan not in ("7d", "30d"):
-                plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+            plan_days = self._subs_storage.get_plan_days(sub.plan)
             expires_at = int(time.time()) + plan_days * 86400
             await self._subs_storage.activate(
                 user_id=chat_id,

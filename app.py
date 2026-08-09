@@ -80,6 +80,8 @@ async def _poll_invoices_loop(
             if expired_pending:
                 logger.info("⏰ %s expired pending invoice(s) found — cancelling", len(expired_pending))
             for sub in expired_pending:
+                if sub.payment_gateway == "platega":
+                    continue
                 await subs_storage.cancel_pending(sub.user_id)
                 language = await telegram.get_language(sub.user_id)
                 await telegram.send_message(
@@ -91,18 +93,18 @@ async def _poll_invoices_loop(
 
             pending = await subs_storage.get_pending_invoices()
             if pending:
-                invoice_ids = [s.invoice_id for s in pending if s.invoice_id is not None]
+                invoice_ids = [s.invoice_id for s in pending if s.invoice_id is not None and s.payment_gateway != "platega"]
                 if invoice_ids:
                     invoices = await crypto_client.get_invoices(invoice_ids)
                     paid_map = {i.invoice_id: i for i in invoices if i.status == "paid"}
                     if paid_map:
                         logger.info("💰 %s paid invoice(s) found for pending subscriptions", len(paid_map))
                     for sub in pending:
+                        if sub.payment_gateway == "platega":
+                            continue
                         if sub.invoice_id in paid_map:
                             inv = paid_map[sub.invoice_id]
-                            plan_days = 7 if sub.plan == "7d" else 30
-                            if sub.plan not in ("7d", "30d"):
-                                plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+                            plan_days = subs_storage.get_plan_days(sub.plan)
                             expires_at = int(time.time()) + plan_days * 86400
                             await subs_storage.activate(
                                 user_id=sub.user_id,
@@ -185,9 +187,7 @@ async def _poll_platega_loop(
                     continue
                 txn = await platega_client.get_payment_status(sub.payment_hash)
                 if txn is not None and txn.status == "CONFIRMED":
-                    plan_days = 7 if sub.plan == "7d" else 30
-                    if sub.plan not in ("7d", "30d"):
-                        plan_days = int(sub.plan.rstrip("d")) if sub.plan.endswith("d") else 30
+                    plan_days = subs_storage.get_plan_days(sub.plan)
                     expires_at = int(time.time()) + plan_days * 86400
                     await subs_storage.activate(
                         user_id=sub.user_id,
@@ -343,11 +343,8 @@ async def main() -> None:
             _poll_invoices_loop(crypto_client, subs_storage, telegram),
         )
         logger.info("✅ Invoice polling started (interval: 30s)")
-        expiry_task = asyncio.create_task(
-            _expire_subscriptions_loop(subs_storage, url_storage),
-        )
-        logger.info("✅ Subscription expiry checker started (interval: 10min)")
-    elif platega_client is not None:
+
+    if crypto_client is not None or platega_client is not None:
         expiry_task = asyncio.create_task(
             _expire_subscriptions_loop(subs_storage, url_storage),
         )

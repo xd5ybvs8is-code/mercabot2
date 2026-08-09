@@ -29,6 +29,16 @@ class SubscriptionStorage:
     def __init__(self, db: DatabaseConnection) -> None:
         self._db = db
 
+    @staticmethod
+    def get_plan_days(plan: str) -> int:
+        if plan == "7d":
+            return 7
+        if plan == "30d":
+            return 30
+        if plan.endswith("d"):
+            return int(plan.rstrip("d"))
+        return 30
+
     async def get_active(self, user_id: str) -> SubscriptionRow | None:
         cursor = await self._db.conn.execute(
             "SELECT * FROM subscriptions WHERE user_id = ? AND status = 'active' AND expires_at > ?",
@@ -178,13 +188,16 @@ class SubscriptionStorage:
         row = await cursor.fetchone()
         return row is not None
 
-    async def activate_trial(self, user_id: str, expires_at: int) -> None:
+    async def activate_trial(self, user_id: str, expires_at: int) -> bool:
         now = int(time.time())
         async with self._db.transaction() as conn:
-            await conn.execute(
+            cursor = await conn.execute(
                 "INSERT OR IGNORE INTO trial_usages (user_id, used_at) VALUES (?, ?)",
                 (user_id, now),
             )
+            if cursor.rowcount == 0:
+                logger.warning("⚠️  Trial already used by user %s — activation blocked", user_id)
+                return False
             await conn.execute(
                 "INSERT INTO subscriptions (user_id, plan, status, subscribed_at, expires_at, created_at, updated_at) "
                 "VALUES (?, 'trial', 'active', ?, ?, ?, ?) "
@@ -197,6 +210,7 @@ class SubscriptionStorage:
                 (user_id, now, expires_at, now, now),
             )
         logger.info("🎁 Trial activated for user %s (expires=%s)", user_id, expires_at)
+        return True
 
     async def whitelist_add(self, user_id: str, granted_by: str) -> bool:
         now = int(time.time())
