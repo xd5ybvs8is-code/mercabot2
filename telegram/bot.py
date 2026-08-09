@@ -1303,11 +1303,29 @@ class TelegramNotifier:
                     reply_markup={"inline_keyboard": []},
                 )
             await self._client.answer_callback_query(cb_id)
-            await self.send_message(
-                chat_id,
-                tr("welcome" if previous_language is None else "language_changed", language),
-                keyboard_kind="main",
-            )
+            if previous_language is None:
+                if (
+                    self._subs_storage is not None
+                    and not await self._subs_storage.is_subscribed(chat_id)
+                    and not await self._subs_storage.has_used_trial(chat_id)
+                ):
+                    markup = build_trial_keyboard(language)
+                    payload = {
+                        "chat_id": chat_id,
+                        "text": tr("welcome", language),
+                        "parse_mode": "HTML",
+                        "reply_markup": markup,
+                    }
+                    result = await self._client.call_api_json("sendMessage", payload)
+                    if result and result.get("ok"):
+                        msg = result.get("result", {})
+                        trial_msg_id = msg.get("message_id")
+                        if trial_msg_id:
+                            self._trial_msg_ids[chat_id] = trial_msg_id
+                else:
+                    await self.send_message(chat_id, tr("welcome", language), keyboard_kind="main")
+            else:
+                await self.send_message(chat_id, tr("language_changed", language), keyboard_kind="main")
             return
 
         if data == "list_back":
