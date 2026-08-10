@@ -22,6 +22,7 @@ class Settings:
     cryptobot_api_token: str
     platega_merchant_id: str
     platega_secret: str
+    metrics_port: int
 
 
 def _parse_check_interval(raw: str | None) -> int:
@@ -84,4 +85,5 @@ def load_settings(env_path: Path | None = None) -> Settings:
         cryptobot_api_token=os.getenv("CRYPTOBOT_API_TOKEN", "").strip(),
         platega_merchant_id=os.getenv("PLATEGA_MERCHANT_ID", "").strip(),
         platega_secret=os.getenv("PLATEGA_SECRET", "").strip(),
+        metrics_port=_parse_int(os.getenv("METRICS_PORT"), 9090, "METRICS_PORT"),
     )

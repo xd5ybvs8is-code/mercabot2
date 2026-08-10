@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import time
+from typing import TYPE_CHECKING
 
 from config import Settings
 from mercari.client import MercariClient
@@ -9,6 +11,9 @@ from models.item import Item
 from storage.urls import UrlStorage, SearchUrlRow
 from storage.subscriptions import SubscriptionStorage
 from telegram.bot import TelegramNotifier
+
+if TYPE_CHECKING:
+    from metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +30,7 @@ class MercariWatcher:
         devices: DeviceRegistry,
         subs_storage: SubscriptionStorage | None = None,
         admin_user_ids: frozenset[str] = frozenset(),
+        metrics: "MetricsCollector | None" = None,
     ) -> None:
         self._settings = settings
         self._url_storage = url_storage
@@ -33,6 +39,7 @@ class MercariWatcher:
         self._devices = devices
         self._subs_storage = subs_storage
         self._admin_user_ids = admin_user_ids
+        self._metrics = metrics
         self._stop = False
         self._force_reload = False
         # Приостановка watcher'а администратором: цикл остаётся жив,
@@ -111,6 +118,7 @@ class MercariWatcher:
 
         while not self._stop:
             cycle += 1
+            cycle_start = time.monotonic()
             logger.info("─" * 40)
             logger.info("🔄 Watch cycle #%s starting", cycle)
 
@@ -119,11 +127,23 @@ class MercariWatcher:
             # интервалами, чтобы быстро отреагировать на resume()/stop().
             if self._paused:
                 logger.info("⏸️  Watcher is PAUSED — skipping cycle #%s", cycle)
+                if self._metrics is not None:
+                    await self._metrics.set_gauge("mercabot_watcher_paused", 1.0)
                 await self._wait_while_paused()
                 continue
 
+            if self._metrics is not None:
+                await self._metrics.set_gauge("mercabot_watcher_paused", 0.0)
+
             urls = await self._url_storage.get_active_urls()
             logger.info("   Active URLs in DB: %s", len(urls))
+            if self._metrics is not None:
+                await self._metrics.set_gauge("mercabot_active_urls", float(len(urls)))
+                users_set = await self._url_storage.get_all_user_chat_ids()
+                await self._metrics.set_gauge("mercabot_active_users", float(len(users_set)))
+                if self._subs_storage is not None:
+                    subs_total = await self._subs_storage.count_all()
+                    await self._metrics.set_gauge("mercabot_active_subscriptions", float(subs_total))
             if not urls:
                 logger.info("⏸️  No active URLs — sleeping until next cycle")
                 await self._wait_interval()
@@ -152,6 +172,10 @@ class MercariWatcher:
                     logger.warning(
                         "   ⚠️  %s URL(s) had errors during bootstrap", len(errors),
                     )
+                    if self._metrics is not None:
+                        await self._metrics.inc_counter(
+                            "mercabot_watch_cycle_errors_total", delta=len(errors),
+                        )
                     for i, err in enumerate(errors, 1):
                         logger.warning("      Bootstrap error %s: %s", i, err)
                 logger.info("   ✅ Bootstrap phase complete")
@@ -184,6 +208,10 @@ class MercariWatcher:
             errors = [r for r in results if isinstance(r, Exception)]
             if errors:
                 logger.warning("   ⚠️  %s URL(s) had errors during fetch", len(errors))
+                if self._metrics is not None:
+                    await self._metrics.inc_counter(
+                        "mercabot_watch_cycle_errors_total", delta=len(errors),
+                    )
                 for i, err in enumerate(errors, 1):
                     logger.warning("      Error %s: %s", i, err)
             else:
@@ -197,6 +225,12 @@ class MercariWatcher:
                 self._startup = False
                 logger.info("   🔇 Startup cycle complete — notifications enabled for next cycles")
             logger.info("   ✅ Watch cycle #%s complete", cycle)
+            cycle_elapsed = time.monotonic() - cycle_start
+            if self._metrics is not None:
+                await self._metrics.inc_counter("mercabot_watch_cycle_total")
+                await self._metrics.observe_histogram(
+                    "mercabot_watch_cycle_duration_seconds", cycle_elapsed,
+                )
             await self._wait_interval()
 
         logger.info("=" * 50)

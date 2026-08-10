@@ -12,6 +12,7 @@ from platega.client import PlategaClient
 from mercari.client import MercariClient
 from mercari.devices import DeviceRegistry
 from mercari.watcher import MercariWatcher
+from metrics import MetricsCollector, MetricsServer
 from storage.connection import DatabaseConnection
 from storage.subscriptions import SubscriptionStorage
 from storage.urls import UrlStorage
@@ -236,6 +237,10 @@ async def main() -> None:
     logger.info("   Admin users: %s (%s)", len(settings.admin_user_ids), sorted(settings.admin_user_ids) or "none")
     logger.info("   CryptoBot token: %s...%s", settings.cryptobot_api_token[:5], settings.cryptobot_api_token[-5:] if len(settings.cryptobot_api_token) > 5 else "N/A")
     logger.info("   Platega merchant: %s...", settings.platega_merchant_id[:8] if settings.platega_merchant_id else "N/A")
+    logger.info("   Metrics port: %s", settings.metrics_port)
+
+    # ── Metrics collector (shared across components) ─────────────
+    metrics = MetricsCollector()
 
     # ── 2. Database ──────────────────────────────────────────────
     logger.info("─" * 40)
@@ -270,6 +275,7 @@ async def main() -> None:
     client = MercariClient(
         max_concurrency=settings.max_concurrency,
         request_delay=settings.request_delay,
+        metrics=metrics,
     )
     await client.start()
     logger.info("✅ Mercari client started")
@@ -312,8 +318,9 @@ async def main() -> None:
         subs_storage=subs_storage,
         crypto_client=crypto_client,
         platega_client=platega_client,
+        metrics=metrics,
     )
-    watcher = MercariWatcher(settings, url_storage, telegram, client, devices, subs_storage, settings.admin_user_ids)
+    watcher = MercariWatcher(settings, url_storage, telegram, client, devices, subs_storage, settings.admin_user_ids, metrics=metrics)
 
     handlers = make_handlers(url_storage, watcher, telegram, settings.admin_user_ids, subs_storage)
     telegram.register_commands(handlers)
@@ -326,6 +333,18 @@ async def main() -> None:
 
     await telegram.start()
     logger.info("✅ Telegram bot started")
+
+    # ── Metrics server ────────────────────────────────────────────
+    metrics_server = MetricsServer(
+        metrics,
+        host="127.0.0.1",
+        port=settings.metrics_port,
+        watcher=watcher,
+        sender=telegram,
+        db_path=settings.db_path,
+    )
+    await metrics_server.start()
+    logger.info("✅ Metrics server started on port %s", settings.metrics_port)
 
     # ── 7. Polling Loop ──────────────────────────────────────────
     logger.info("─" * 40)
@@ -432,6 +451,10 @@ async def main() -> None:
         logger.info("  • Closing database...")
         await db.close()
         logger.info("  ✅ Database closed")
+
+        logger.info("  • Stopping metrics server...")
+        await metrics_server.stop()
+        logger.info("  ✅ Metrics server stopped")
 
         logger.info("=" * 50)
         logger.info("✅ SHUTDOWN COMPLETE")

@@ -4,9 +4,12 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from telegram.client import TelegramClient, TelegramRateLimitError, TelegramPermanentError
+
+if TYPE_CHECKING:
+    from metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +83,14 @@ class MessageSender:
         chat_min_interval: float = 1.0,
         admin_user_ids: frozenset[str] = frozenset(),
         on_chat_lost: Callable[[str], Awaitable[None]] | None = None,
+        metrics: "MetricsCollector | None" = None,
     ) -> None:
         self._client = client
         self._target_rate = max(1, int(rate_per_sec))
         self._chat_min_interval = max(0.0, float(chat_min_interval))
         self._admin_user_ids = admin_user_ids
         self._on_chat_lost = on_chat_lost
+        self._metrics = metrics
         self._queue: asyncio.PriorityQueue[OutgoingMessage] = asyncio.PriorityQueue()
         self._seq = 0
         self._task: asyncio.Task[None] | None = None
@@ -171,6 +176,8 @@ class MessageSender:
             on_success=on_success,
         )
         self._queue.put_nowait(msg)
+        if self._metrics is not None:
+            asyncio.ensure_future(self._metrics.inc_counter("mercabot_notifications_queued_total"))
         logger.debug(
             "📨 Enqueued msg #%s (chat=%s, prio=%s, qsize=%s)",
             msg.seq, chat_id, priority, self._queue.qsize(),
@@ -232,6 +239,14 @@ class MessageSender:
                         "tick: sent=%s deferred=%s qsize=%s rate=%s%s",
                         sent_this_tick, len(deferred), self._queue.qsize(),
                         self._current_rate, " [429]" if rate_limited else "",
+                    )
+
+                if self._metrics is not None:
+                    await self._metrics.set_gauge(
+                        "mercabot_sender_queue_size", float(self._queue.qsize()),
+                    )
+                    await self._metrics.set_gauge(
+                        "mercabot_sender_current_rate", float(self._current_rate),
                     )
 
                 # Sleep до следующей секунды, но реагируем на stop.
@@ -328,8 +343,12 @@ class MessageSender:
                 except Exception:
                     logger.exception("Failed to clean up lost chat %s", msg.chat_id)
             self._log_dropped_message(msg)
+            if self._metrics is not None:
+                await self._metrics.inc_counter("mercabot_notifications_failed_total")
             return _DROPPED
         except TelegramRateLimitError as exc:
+            if self._metrics is not None:
+                await self._metrics.inc_counter("mercabot_telegram_429_total")
             # Telegram просит притормозить: спим и снижаем скорость вдвое.
             self._success_streak = 0
             self._current_rate = max(MIN_RATE, self._current_rate // 2)
@@ -356,6 +375,8 @@ class MessageSender:
                             msg.seq, _MAX_DURABLE_ATTEMPTS, msg.chat_id,
                         )
                         self._log_dropped_message(msg)
+                        if self._metrics is not None:
+                            await self._metrics.inc_counter("mercabot_notifications_failed_total")
                         return _DROPPED
                     self._queue.put_nowait(msg)
                     logger.error(
@@ -369,6 +390,8 @@ class MessageSender:
                     msg.seq, _MAX_ATTEMPTS, msg.chat_id,
                 )
                 self._log_dropped_message(msg)
+                if self._metrics is not None:
+                    await self._metrics.inc_counter("mercabot_notifications_failed_total")
                 return _DROPPED
             self._success_streak = 0
             logger.error(
@@ -397,6 +420,8 @@ class MessageSender:
                 self._queue.put_nowait(msg)
                 logger.exception("Failed to acknowledge delivered msg #%s", msg.seq)
                 return _FAILED
+        if self._metrics is not None:
+            await self._metrics.inc_counter("mercabot_notifications_sent_total")
         return _OK
 
     def _log_dropped_message(self, msg: OutgoingMessage) -> None:

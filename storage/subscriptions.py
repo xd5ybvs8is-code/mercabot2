@@ -180,6 +180,14 @@ class SubscriptionStorage:
     async def is_subscribed(self, user_id: str) -> bool:
         return await self.get_active(user_id) is not None
 
+    async def count_all(self) -> int:
+        """Total subscriptions (pending + active)."""
+        cursor = await self._db.conn.execute(
+            "SELECT COUNT(*) FROM subscriptions WHERE status IN ('pending', 'active')",
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
     async def has_used_trial(self, user_id: str) -> bool:
         cursor = await self._db.conn.execute(
             "SELECT 1 FROM trial_usages WHERE user_id = ?",

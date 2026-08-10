@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from storage.subscriptions import SubscriptionStorage
     from crypto.client import CryptoPayClient
     from platega.client import PlategaClient
+    from metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ class TelegramNotifier:
         subs_storage: "SubscriptionStorage | None" = None,
         crypto_client: "CryptoPayClient | None" = None,
         platega_client: "PlategaClient | None" = None,
+        metrics: "MetricsCollector | None" = None,
     ) -> None:
         self._client = TelegramClient(token)
         self._admin_user_ids = admin_user_ids
@@ -80,6 +82,7 @@ class TelegramNotifier:
             chat_min_interval=chat_min_interval,
             admin_user_ids=admin_user_ids,
             on_chat_lost=self._on_chat_lost,
+            metrics=metrics,
         )
         self._offset: int | None = None
         self._command_handlers: dict[str, CommandHandler] = {}

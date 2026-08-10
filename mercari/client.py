@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+import time
+from typing import Any, TYPE_CHECKING
 
 import aiohttp
 
@@ -21,6 +22,9 @@ from mercari.conditions import SearchCondition
 from mercari.dpop import DpopSigner
 from mercari.parser import parse_items
 from models.item import Item
+
+if TYPE_CHECKING:
+    from metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +78,7 @@ class MercariClient:
         request_delay: float = 0.0,
         proxy: str | None = None,
         cookies: dict[str, str] | None = None,
+        metrics: "MetricsCollector | None" = None,
     ) -> None:
         # `dpop` опционален: основной путь (watcher) передаёт per-user signer
         # явно в search(). Дефолт нужен только для не-user контекстов (тесты,
@@ -84,6 +89,7 @@ class MercariClient:
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._request_delay = request_delay
         self._session: aiohttp.ClientSession | None = None
+        self._metrics = metrics
 
     @property
     def device_uuid(self) -> str | None:
@@ -210,6 +216,9 @@ class MercariClient:
     ) -> list[Item]:
         if self._session is None:
             raise RuntimeError("MercariClient is not started; call start() first")
+        start_ts = time.monotonic()
+        status = "unknown"
+        items_count = 0
         try:
             logger.debug("📡 POST %s (payload keys: %s)", SEARCH_API_URL, list(payload.keys()))
             async with self._session.post(
@@ -222,9 +231,12 @@ class MercariClient:
                 if response.status == 200:
                     data = await response.json()
                     items = parse_items(data)
-                    logger.info("✅ Mercari search returned %s items (HTTP 200)", len(items))
+                    items_count = len(items)
+                    status = "200"
+                    logger.info("✅ Mercari search returned %s items (HTTP 200)", items_count)
                     return items
                 body = await response.text()
+                status = str(response.status)
                 logger.warning("⚠️  HTTP %s from Mercari API: %s", response.status, body[:200])
                 # 429 / 5xx — повторяем, прочие 4xx — нет смысла.
                 if response.status == 429 or response.status >= 500:
@@ -233,12 +245,30 @@ class MercariClient:
                     f"HTTP {response.status}: {body[:200]}"
                 )
         except aiohttp.ClientError as exc:
+            status = "network_error"
             logger.warning("⚠️  aiohttp network error: %s", exc)
             # Сетевые сбои тоже ретраим — они часто мимолётны.
             raise _Retryable(f"aiohttp error: {exc}") from exc
         except asyncio.TimeoutError as exc:
+            status = "timeout"
             logger.warning("⚠️  Request timeout (%ss) — will retry", REQUEST_TIMEOUT.total)
             raise _Retryable("request timeout") from exc
+        finally:
+            elapsed = time.monotonic() - start_ts
+            if self._metrics is not None:
+                await self._metrics.inc_counter(
+                    "mercabot_mercari_requests_total",
+                    labels={"status": status},
+                )
+                await self._metrics.observe_histogram(
+                    "mercabot_mercari_request_duration_seconds",
+                    elapsed,
+                )
+                if items_count > 0:
+                    await self._metrics.inc_counter(
+                        "mercabot_items_found_total",
+                        delta=items_count,
+                    )
 
 
 class _Retryable(Exception):
