@@ -4,6 +4,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import quote_plus
 
 from typing import TYPE_CHECKING
 
@@ -46,6 +47,48 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 2.0
+
+# Границы цены для фильтра по ключевому слову (как на Mercari).
+PRICE_MIN = 300
+PRICE_MAX = 9999999
+
+
+def _build_keyword_search_url(
+    keyword: str,
+    price_min: int = 0,
+    price_max: int = 0,
+) -> str:
+    """Собрать поисковый URL Mercari по ключевому слову и фильтру цены."""
+    params: list[tuple[str, str]] = [("keyword", quote_plus(keyword))]
+    if price_min:
+        params.append(("price_min", str(price_min)))
+    if price_max:
+        params.append(("price_max", str(price_max)))
+    params.append(("sort", "created_time"))
+    params.append(("order", "desc"))
+    return "https://jp.mercari.com/en/search?" + "&".join(f"{k}={v}" for k, v in params)
+
+
+def _parse_single_price(text: str) -> int | None:
+    """Parse a single integer price. Returns None if not a plain integer."""
+    value = text.strip().replace(",", "").replace(" ", "")
+    if not value.isdigit():
+        return None
+    return int(value)
+
+
+def _parse_price_range(text: str) -> tuple[int, int] | None:
+    """Parse 'from-to' price range. Accepts '-', space or comma separator."""
+    t = text.strip()
+    for sep in ("-", " ", ","):
+        if sep in t:
+            parts = [p.strip() for p in t.split(sep) if p.strip()]
+            if len(parts) == 2:
+                lo = _parse_single_price(parts[0])
+                hi = _parse_single_price(parts[1])
+                if lo is not None and hi is not None:
+                    return lo, hi
+    return None
 
 # Handler type: (argument, chat_id, user_id) -> response text (async).
 # user_id — Telegram account id отправителя (message.from.id), нужен для
@@ -447,9 +490,142 @@ class TelegramNotifier:
 
         if state and state.get("phase") == "add_keyword":
             keyword = text.strip()
+            self._awaiting[chat_id] = {"phase": "keyword_filter", "keyword": keyword}
+            logger.info("   → User %s provided keyword '%s', awaiting filter choice", chat_id, keyword)
+            await self.send_message(
+                chat_id,
+                tr("choose_keyword_filter", language, keyword=escape(keyword)),
+                keyboard_kind="keyword_filter",
+            )
+            return
+
+        if state and state.get("phase") == "keyword_filter":
+            keyword = state.get("keyword", "")
+            if text in {button_text("price_range_type", language), "💴 Диапазон цены"}:
+                self._awaiting[chat_id] = {"phase": "price_filter", "keyword": keyword}
+                logger.info("   → User %s chose price filter for keyword '%s'", chat_id, keyword)
+                await self.send_message(
+                    chat_id,
+                    tr("price_filter_prompt", language),
+                    keyboard_kind="price_filter",
+                )
+                return
+            if text in {button_text("all_products_type", language), "🛍️ Все товары"}:
+                url = _build_keyword_search_url(keyword)
+                del self._awaiting[chat_id]
+                logger.info("   → User %s chose all products for keyword '%s'", chat_id, keyword)
+                await self._run_handler("/add", f"{url} | {keyword}", chat_id, user_id)
+                return
+            logger.warning("   ⚠️  Unexpected input '%s' in keyword_filter phase from user %s", text, chat_id)
+            await self.send_message(
+                chat_id,
+                tr("choose_keyword_filter", language, keyword=escape(keyword)),
+                keyboard_kind="keyword_filter",
+            )
+            return
+
+        if state and state.get("phase") == "price_filter":
+            keyword = state.get("keyword", "")
+            if text in {button_text("price_up_to", language), "💴 До цены"}:
+                self._awaiting[chat_id] = {"phase": "price_max", "keyword": keyword}
+                logger.info("   → User %s chose max price for keyword '%s'", chat_id, keyword)
+                await self.send_message(
+                    chat_id,
+                    tr("enter_price_max", language),
+                    keyboard_kind="cancel",
+                    placeholder=tr("price_placeholder", language),
+                )
+                return
+            if text in {button_text("price_from", language), "💴 От цены"}:
+                self._awaiting[chat_id] = {"phase": "price_min", "keyword": keyword}
+                logger.info("   → User %s chose min price for keyword '%s'", chat_id, keyword)
+                await self.send_message(
+                    chat_id,
+                    tr("enter_price_min", language),
+                    keyboard_kind="cancel",
+                    placeholder=tr("price_placeholder", language),
+                )
+                return
+            if text in {button_text("price_between", language), "💴 От и до"}:
+                self._awaiting[chat_id] = {"phase": "price_range", "keyword": keyword}
+                logger.info("   → User %s chose price range for keyword '%s'", chat_id, keyword)
+                await self.send_message(
+                    chat_id,
+                    tr("enter_price_range", language),
+                    keyboard_kind="cancel",
+                    placeholder=tr("price_range_placeholder", language),
+                )
+                return
+            logger.warning("   ⚠️  Unexpected input '%s' in price_filter phase from user %s", text, chat_id)
+            await self.send_message(
+                chat_id,
+                tr("price_filter_prompt", language),
+                keyboard_kind="price_filter",
+            )
+            return
+
+        if state and state.get("phase") == "price_max":
+            keyword = state.get("keyword", "")
+            price = _parse_single_price(text)
+            if price is None or price < PRICE_MIN or price > PRICE_MAX:
+                logger.warning("   ⚠️  Invalid max price '%s' from user %s", text, chat_id)
+                await self.send_message(
+                    chat_id,
+                    tr("price_invalid", language),
+                    keyboard_kind="cancel",
+                    placeholder=tr("price_placeholder", language),
+                )
+                return
             del self._awaiting[chat_id]
-            logger.info("   → User %s provided keyword '%s', calling /add handler", chat_id, keyword)
-            await self._run_handler("/add", keyword, chat_id, user_id)
+            url = _build_keyword_search_url(keyword, price_max=price)
+            logger.info("   → User %s set max price %s for keyword '%s'", chat_id, price, keyword)
+            await self._run_handler("/add", f"{url} | {keyword}", chat_id, user_id)
+            return
+
+        if state and state.get("phase") == "price_min":
+            keyword = state.get("keyword", "")
+            price = _parse_single_price(text)
+            if price is None or price < PRICE_MIN or price > PRICE_MAX:
+                logger.warning("   ⚠️  Invalid min price '%s' from user %s", text, chat_id)
+                await self.send_message(
+                    chat_id,
+                    tr("price_invalid", language),
+                    keyboard_kind="cancel",
+                    placeholder=tr("price_placeholder", language),
+                )
+                return
+            del self._awaiting[chat_id]
+            url = _build_keyword_search_url(keyword, price_min=price)
+            logger.info("   → User %s set min price %s for keyword '%s'", chat_id, price, keyword)
+            await self._run_handler("/add", f"{url} | {keyword}", chat_id, user_id)
+            return
+
+        if state and state.get("phase") == "price_range":
+            keyword = state.get("keyword", "")
+            parsed = _parse_price_range(text)
+            if parsed is None:
+                logger.warning("   ⚠️  Unparsable price range '%s' from user %s", text, chat_id)
+                await self.send_message(
+                    chat_id,
+                    tr("price_range_invalid", language),
+                    keyboard_kind="cancel",
+                    placeholder=tr("price_range_placeholder", language),
+                )
+                return
+            lo, hi = parsed
+            if lo < PRICE_MIN or hi > PRICE_MAX or lo >= hi:
+                logger.warning("   ⚠️  Invalid price range %s-%s from user %s", lo, hi, chat_id)
+                await self.send_message(
+                    chat_id,
+                    tr("price_range_invalid", language),
+                    keyboard_kind="cancel",
+                    placeholder=tr("price_range_placeholder", language),
+                )
+                return
+            del self._awaiting[chat_id]
+            url = _build_keyword_search_url(keyword, price_min=lo, price_max=hi)
+            logger.info("   → User %s set price range %s-%s for keyword '%s'", chat_id, lo, hi, keyword)
+            await self._run_handler("/add", f"{url} | {keyword}", chat_id, user_id)
             return
 
         if state and state.get("phase") == "rename":

@@ -117,6 +117,44 @@ def build_add_type_keyboard_markup(
     return result
 
 
+def build_keyword_filter_keyboard_markup(
+    language: str = "ru",
+    placeholder: str | None = None,
+) -> dict[str, Any]:
+    """Build keyword filter choice reply keyboard markup."""
+    result: dict[str, Any] = {
+        "keyboard": [
+            [{"text": button_text("price_range_type", language)}, {"text": button_text("all_products_type", language)}],
+            [{"text": button_text("back", language)}],
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False,
+    }
+    if placeholder:
+        result["input_field_placeholder"] = placeholder
+    return result
+
+
+def build_price_filter_keyboard_markup(
+    language: str = "ru",
+    placeholder: str | None = None,
+) -> dict[str, Any]:
+    """Build price filter type reply keyboard markup."""
+    result: dict[str, Any] = {
+        "keyboard": [
+            [{"text": button_text("price_up_to", language)}],
+            [{"text": button_text("price_from", language)}],
+            [{"text": button_text("price_between", language)}],
+            [{"text": button_text("back", language)}],
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False,
+    }
+    if placeholder:
+        result["input_field_placeholder"] = placeholder
+    return result
+
+
 def build_url_management_keyboard_markup(
     language: str = "ru",
     placeholder: str | None = None,

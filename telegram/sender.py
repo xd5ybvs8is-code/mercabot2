@@ -291,6 +291,8 @@ class MessageSender:
                 build_admin_whitelist_keyboard_markup,
                 build_cancel_keyboard_markup,
                 build_add_type_keyboard_markup,
+                build_keyword_filter_keyboard_markup,
+                build_price_filter_keyboard_markup,
                 build_url_management_keyboard_markup,
             )
 
@@ -300,6 +302,14 @@ class MessageSender:
                 )
             elif msg.keyboard_kind == "add_type":
                 payload["reply_markup"] = build_add_type_keyboard_markup(
+                    language=msg.language, placeholder=msg.placeholder,
+                )
+            elif msg.keyboard_kind == "keyword_filter":
+                payload["reply_markup"] = build_keyword_filter_keyboard_markup(
+                    language=msg.language, placeholder=msg.placeholder,
+                )
+            elif msg.keyboard_kind == "price_filter":
+                payload["reply_markup"] = build_price_filter_keyboard_markup(
                     language=msg.language, placeholder=msg.placeholder,
                 )
             elif msg.keyboard_kind == "admin_whitelist":

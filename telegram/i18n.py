@@ -356,6 +356,47 @@ TEXTS: dict[str, dict[Language, str]] = {
         "ru": "✅ Оплата через СБП подтверждена!\n\n📦 {plan}\n⏰ До: {expires}",
         "en": "✅ SBP payment confirmed!\n\n📦 {plan}\n⏰ Until: {expires}",
     },
+    "price_range_type": {"ru": "💴 Диапазон цены", "en": "💴 Price range"},
+    "all_products_type": {"ru": "🛍️ Все товары", "en": "🛍️ All products"},
+    "choose_keyword_filter": {
+        "ru": "🔤 Ключевое слово: <b>{keyword}</b>\n\nВыберите вариант поиска:",
+        "en": "🔤 Keyword: <b>{keyword}</b>\n\nChoose a search option:",
+    },
+    "price_filter_prompt": {
+        "ru": "💴 <b>Фильтр цены</b>\n\nВыберите, как ограничить цену:",
+        "en": "💴 <b>Price filter</b>\n\nChoose how to limit the price:",
+    },
+    "price_up_to": {"ru": "💴 До цены", "en": "💴 Up to price"},
+    "price_from": {"ru": "💴 От цены", "en": "💴 From price"},
+    "price_between": {"ru": "💴 От и до", "en": "💴 From and to"},
+    "enter_price_max": {
+        "ru": "💴 Введите максимальную цену (до) в йенах.\n\nДопустимый диапазон: 300 – 9 999 999 йен.",
+        "en": "💴 Enter the maximum price (up to) in yen.\n\nAllowed range: 300 – 9,999,999 yen.",
+    },
+    "enter_price_min": {
+        "ru": "💴 Введите минимальную цену (от) в йенах.\n\nДопустимый диапазон: 300 – 9 999 999 йен.",
+        "en": "💴 Enter the minimum price (from) in yen.\n\nAllowed range: 300 – 9,999,999 yen.",
+    },
+    "enter_price_range": {
+        "ru": "💴 Введите диапазон цены в формате <b>от-до</b>.\n\nНапример: 1000-11000\n\nДопустимый диапазон: 300 – 9 999 999 йен.",
+        "en": "💴 Enter the price range in the format <b>from-to</b>.\n\nExample: 1000-11000\n\nAllowed range: 300 – 9,999,999 yen.",
+    },
+    "price_placeholder": {
+        "ru": "Введите цену в йенах...",
+        "en": "Enter the price in yen...",
+    },
+    "price_range_placeholder": {
+        "ru": "Введите цену от-до, напр. 1000-11000...",
+        "en": "Enter price from-to, e.g. 1000-11000...",
+    },
+    "price_invalid": {
+        "ru": "❌ Неверная цена.\n\nВведите целое число в диапазоне 300 – 9 999 999 йен.",
+        "en": "❌ Invalid price.\n\nEnter an integer between 300 and 9,999,999 yen.",
+    },
+    "price_range_invalid": {
+        "ru": "❌ Неверный диапазон цены.\n\nВведите в формате <b>от-до</b> (например 1000-11000).\nМинимум 300 йен, максимум 9 999 999 йен.",
+        "en": "❌ Invalid price range.\n\nEnter in the format <b>from-to</b> (e.g. 1000-11000).\nMinimum 300 yen, maximum 9,999,999 yen.",
+    },
 }
 
 
