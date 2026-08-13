@@ -212,6 +212,10 @@ TEXTS: dict[str, dict[Language, str]] = {
         "ru": "✅ Статус: <b>Активна</b>\n⏰ До: <b>{expires}</b>\n📦 План: <b>{plan}</b>",
         "en": "✅ Status: <b>Active</b>\n⏰ Until: <b>{expires}</b>\n📦 Plan: <b>{plan}</b>",
     },
+    "subscription_status_paid": {
+        "ru": "💳 Оплачено: <b>{amount} {asset}</b> · {gateway}",
+        "en": "💳 Paid: <b>{amount} {asset}</b> · {gateway}",
+    },
     "subscription_status_pending": {
         "ru": "⏳ Статус: <b>Ожидает оплаты</b>\n\nСчёт ещё не оплачен.",
         "en": "⏳ Status: <b>Awaiting payment</b>\n\nThe invoice has not been paid yet.",

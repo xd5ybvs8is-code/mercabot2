@@ -39,6 +39,20 @@ class SubscriptionStorage:
             return int(plan.rstrip("d"))
         return 30
 
+    async def get_renewal_expiry(self, user_id: str, plan_days: int) -> int:
+        """Timestamp of expiry for a renewal.
+
+        Если текущая подписка ещё не истекла, срок плюсуется к её дате
+        окончания; иначе отсчитывается от «сейчас». Старый expires_at при
+        покупке сохраняется в строке (create() его не трогает), поэтому
+        смотрим на get_any, а не на get_active.
+        """
+        base = int(time.time())
+        row = await self.get_any(user_id)
+        if row is not None and row.expires_at and row.expires_at > base:
+            base = row.expires_at
+        return base + plan_days * 86400
+
     async def get_active(self, user_id: str) -> SubscriptionRow | None:
         cursor = await self._db.conn.execute(
             "SELECT * FROM subscriptions WHERE user_id = ? AND status = 'active' AND expires_at > ?",

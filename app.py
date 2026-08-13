@@ -106,7 +106,7 @@ async def _poll_invoices_loop(
                         if sub.invoice_id in paid_map:
                             inv = paid_map[sub.invoice_id]
                             plan_days = subs_storage.get_plan_days(sub.plan)
-                            expires_at = int(time.time()) + plan_days * 86400
+                            expires_at = await subs_storage.get_renewal_expiry(sub.user_id, plan_days)
                             await subs_storage.activate(
                                 user_id=sub.user_id,
                                 plan=sub.plan,
@@ -189,7 +189,7 @@ async def _poll_platega_loop(
                 txn = await platega_client.get_payment_status(sub.payment_hash)
                 if txn is not None and txn.status == "CONFIRMED":
                     plan_days = subs_storage.get_plan_days(sub.plan)
-                    expires_at = int(time.time()) + plan_days * 86400
+                    expires_at = await subs_storage.get_renewal_expiry(sub.user_id, plan_days)
                     await subs_storage.activate(
                         user_id=sub.user_id,
                         plan=sub.plan,
