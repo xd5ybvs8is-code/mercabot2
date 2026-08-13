@@ -595,10 +595,7 @@ class TelegramNotifier:
         if not urls:
             self._list_pages.pop(chat_id, None)
             list_text = tr("no_urls", language)
-            markup = {"inline_keyboard": [[{
-                "text": "🔙 Back" if language == "en" else "🔙 Назад",
-                "callback_data": "list_back",
-            }]]}
+            markup = {"inline_keyboard": []}
         else:
             page = self._list_pages.get(chat_id, 0)
             total_pages = (len(urls) + PAGE_SIZE - 1) // PAGE_SIZE
