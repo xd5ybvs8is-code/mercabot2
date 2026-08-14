@@ -1,15 +1,19 @@
 import logging
+import time
 from html import escape
+from pathlib import Path
 from urllib.parse import quote_plus
 from datetime import datetime
 
 from mercari.conditions import parse_search_url, normalize_search_url
 from storage.urls import UrlStorage
 from storage.subscriptions import SubscriptionStorage
+from storage.users import UserStorage
 from mercari.watcher import MercariWatcher
 from telegram.bot import TelegramNotifier
 from telegram.messages import (
     format_admin_panel,
+    format_admin_stats,
     format_broadcast_prompt,
     format_help,
     format_url_list,
@@ -40,6 +44,10 @@ def make_handlers(
     telegram: TelegramNotifier,
     admin_user_ids: frozenset[str] = frozenset(),
     subs_storage: SubscriptionStorage | None = None,
+    metrics=None,
+    started_at: float | None = None,
+    db_path: Path | None = None,
+    user_storage: UserStorage | None = None,
 ) -> dict:
     """Create a dict of async command handlers for TelegramNotifier.
 
@@ -48,6 +56,42 @@ def make_handlers(
 
     def _is_admin(user_id: str) -> bool:
         return user_id in admin_user_ids
+
+    def _metric(metric_stats: dict, name: str) -> float:
+        values = metric_stats.get(name, {})
+        if not values:
+            return 0.0
+        if "_sum" in values:
+            count = values.get("_count", 0.0)
+            return values["_sum"] / count if count > 0 else 0.0
+        return sum(values.values())
+
+    def _metric_sum(metric_stats: dict, name: str) -> float:
+        values = metric_stats.get(name, {})
+        return sum(v for k, v in values.items() if not k.startswith("_"))
+
+    def _metric_error_sum(metric_stats: dict, name: str) -> float:
+        """Сумма значений с лейблами-статусами, кроме status=ok."""
+        values = metric_stats.get(name, {})
+        return sum(v for k, v in values.items() if "status=ok" not in k and not k.startswith("_"))
+
+    @staticmethod
+    def _format_uptime(seconds: float, language: str) -> str:
+        total = max(0, int(seconds))
+        days, total = divmod(total, 86400)
+        hours, total = divmod(total, 3600)
+        minutes = total // 60
+        if language == "en":
+            if days:
+                return f"{days}d {hours}h {minutes}m"
+            if hours:
+                return f"{hours}h {minutes}m"
+            return f"{minutes}m"
+        if days:
+            return f"{days}д {hours}ч {minutes}м"
+        if hours:
+            return f"{hours}ч {minutes}м"
+        return f"{minutes}м"
 
     async def _check_subscription(chat_id: str, user_id: str, language: str) -> str | None:
         """Returns None if access allowed, or an error message if not."""
@@ -201,6 +245,85 @@ def make_handlers(
             language=language,
         )
 
+    async def cmd_admin_stats(_arg: str, chat_id: str, user_id: str, language: str) -> str:
+        if not _is_admin(user_id):
+            logger.warning("⛔ Non-admin user %s tried /admin_stats", chat_id)
+            return text("no_permission", language)
+        logger.info("📈 Admin stats requested by user %s", chat_id)
+
+        metric_stats: dict = metrics.get_stats() if metrics is not None else {}
+        sender_stats = telegram.sender_stats()
+
+        cycles = int(_metric_sum(metric_stats, "mercabot_watch_cycle_total"))
+        cycle_errors = int(_metric_sum(metric_stats, "mercabot_watch_cycle_errors_total"))
+        avg_cycle = _metric(metric_stats, "mercabot_watch_cycle_duration_seconds")
+        requests = int(_metric_sum(metric_stats, "mercabot_mercari_requests_total"))
+        request_errors = int(_metric_error_sum(metric_stats, "mercabot_mercari_requests_total"))
+        avg_latency = _metric(metric_stats, "mercabot_mercari_request_duration_seconds")
+        items_found = int(_metric_sum(metric_stats, "mercabot_items_found_total"))
+        sent = int(_metric_sum(metric_stats, "mercabot_notifications_sent_total"))
+        failed = int(_metric_sum(metric_stats, "mercabot_notifications_failed_total"))
+        rate_limited = int(_metric_sum(metric_stats, "mercabot_telegram_429_total"))
+
+        url_stats = await url_storage.get_stats()
+        subs_stats = await subs_storage.get_stats() if subs_storage is not None else {}
+        users_count = (
+            await user_storage.count()
+            if user_storage is not None
+            else len(await url_storage.get_all_user_chat_ids())
+        )
+
+        by_status = subs_stats.get("by_status", {})
+        by_plan = subs_stats.get("by_plan", {})
+        plans_str = ", ".join(
+            f"{plan}: {by_plan[plan]}" for plan in sorted(by_plan)
+        ) or "—"
+        revenue = subs_stats.get("revenue", {})
+        revenue_str = ", ".join(
+            f"{asset}: {amount:,.2f}" for asset, amount in sorted(revenue.items())
+        ) or "—"
+
+        uptime = (
+            _format_uptime(time.time() - started_at, language)
+            if started_at is not None else "—"
+        )
+        db_size_mb = "—"
+        if db_path is not None:
+            try:
+                db_size_mb = f"{db_path.stat().st_size / (1024 * 1024):.1f}"
+            except OSError:
+                db_size_mb = "—"
+
+        return format_admin_stats(
+            language=language,
+            uptime=uptime,
+            cycles=cycles,
+            cycle_errors=cycle_errors,
+            avg_cycle=f"{avg_cycle:.1f}",
+            requests=requests,
+            request_errors=request_errors,
+            avg_latency=f"{avg_latency:.2f}",
+            items_found=items_found,
+            sent=sent,
+            failed=failed,
+            rate_limited=rate_limited,
+            queue=sender_stats.get("queue_size", 0),
+            outbox=url_stats.get("outbox", 0),
+            users=users_count,
+            urls_active=url_stats.get("urls_active", 0),
+            urls_total=url_stats.get("urls_total", 0),
+            subs_active=by_status.get("active", 0),
+            subs_pending=by_status.get("pending", 0),
+            subs_expired=by_status.get("expired", 0) + by_status.get("cancelled", 0),
+            plans=plans_str,
+            whitelist=subs_stats.get("whitelist", 0),
+            revenue=revenue_str,
+            db_size=db_size_mb,
+            items_total=url_stats.get("items_total", 0),
+            items_today=url_stats.get("items_today", 0),
+            seen_total=url_stats.get("seen_total", 0),
+        )
+
     async def cmd_admin_pause(_arg: str, chat_id: str, user_id: str, language: str) -> str:
         if not _is_admin(user_id):
             logger.warning("⛔ Non-admin user %s tried /admin_pause", chat_id)
@@ -325,6 +448,7 @@ def make_handlers(
         # ── администраторские ──
         "/admin_panel": cmd_admin_panel,
         "/admin_status": cmd_admin_status,
+        "/admin_stats": cmd_admin_stats,
         "/admin_reload": cmd_admin_reload,
         "/admin_pause": cmd_admin_pause,
         "/admin_resume": cmd_admin_resume,

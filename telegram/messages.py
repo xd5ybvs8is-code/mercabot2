@@ -87,6 +87,10 @@ def format_admin_status(
     )
 
 
+def format_admin_stats(*, language: str = "ru", **values: object) -> str:
+    return text("admin_stats", language, **values)
+
+
 def format_whitelist_list(entries: list[tuple[str, str, int]], language: str = "ru") -> str:
     result = text("whitelist_list_title", language)
     if not entries:

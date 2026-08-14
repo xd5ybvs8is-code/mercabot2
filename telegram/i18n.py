@@ -13,6 +13,7 @@ TEXTS: dict[str, dict[Language, str]] = {
     "url_management_title": {"ru": "📁 <b>Управление URL</b>\n\nВыберите действие:", "en": "📁 <b>Manage URLs</b>\n\nChoose an action:"},
     "admin_panel_btn": {"ru": "🛠 Админ-панель", "en": "🛠 Admin panel"},
     "status": {"ru": "📊 Статус бота", "en": "📊 Bot status"},
+    "admin_stats_btn": {"ru": "📈 Статистика", "en": "📈 Statistics"},
     "reload_urls": {"ru": "🔄 Перезагрузить URL", "en": "🔄 Reload URLs"},
     "pause": {"ru": "⏸️ Пауза", "en": "⏸️ Pause"},
     "resume": {"ru": "▶️ Продолжить", "en": "▶️ Resume"},
@@ -121,8 +122,8 @@ TEXTS: dict[str, dict[Language, str]] = {
         "en": "New listing\n\nTitle:\n{title}\n\nPrice:\n{price:,} JPY\n\nLink:\n{url}",
     },
     "admin_panel": {
-        "ru": "🛠 <b>Админ-панель</b>\n\nДоступные действия:\n📊 <b>Статус бота</b> — сводка состояния\n🔄 <b>Перезагрузить URL</b> — немедленный цикл проверки\n⏸️ <b>Пауза</b> / ▶️ <b>Продолжить</b> — остановка/возобновление watcher'а\n📢 <b>Рассылка всем</b> — отправить сообщение всем пользователям\n🔙 <b>Назад</b> — выйти из админ-панели",
-        "en": "🛠 <b>Admin panel</b>\n\nAvailable actions:\n📊 <b>Bot status</b> — state summary\n🔄 <b>Reload URLs</b> — run an immediate check cycle\n⏸️ <b>Pause</b> / ▶️ <b>Resume</b> — pause/resume the watcher\n📢 <b>Broadcast to all</b> — send a message to all users\n🔙 <b>Back</b> — leave the admin panel",
+        "ru": "🛠 <b>Админ-панель</b>\n\nДоступные действия:\n📊 <b>Статус бота</b> — сводка состояния\n📈 <b>Статистика</b> — подробная статистика по боту\n🔄 <b>Перезагрузить URL</b> — немедленный цикл проверки\n⏸️ <b>Пауза</b> / ▶️ <b>Продолжить</b> — остановка/возобновление watcher'а\n📢 <b>Рассылка всем</b> — отправить сообщение всем пользователям\n🔙 <b>Назад</b> — выйти из админ-панели",
+        "en": "🛠 <b>Admin panel</b>\n\nAvailable actions:\n📊 <b>Bot status</b> — state summary\n📈 <b>Statistics</b> — detailed bot statistics\n🔄 <b>Reload URLs</b> — run an immediate check cycle\n⏸️ <b>Pause</b> / ▶️ <b>Resume</b> — pause/resume the watcher\n📢 <b>Broadcast to all</b> — send a message to all users\n🔙 <b>Back</b> — leave the admin panel",
     },
     "broadcast_prompt": {
         "ru": "📢 <b>Рассылка всем</b>\n\nОтправьте текст сообщения, которое получат все пользователи бота.\nПоддерживается HTML-разметка Telegram.\n\nДля отмены отправьте /admin_back.",
@@ -131,6 +132,62 @@ TEXTS: dict[str, dict[Language, str]] = {
     "admin_status": {
         "ru": "📊 <b>Статус бота</b>\n\nWatcher: {state}\nОчередь сообщений: {queue}\nСкорость отправки: {current}/{target} msg/s\nАктивных URL: {urls}\nПользователей: {users}",
         "en": "📊 <b>Bot status</b>\n\nWatcher: {state}\nMessage queue: {queue}\nSend rate: {current}/{target} msg/s\nActive URLs: {urls}\nUsers: {users}",
+    },
+    "admin_stats": {
+        "ru": (
+            "📈 <b>Статистика бота</b>\n\n"
+            "🕐 Аптайм: {uptime}\n\n"
+            "👀 <b>Мониторинг</b>\n"
+            "Циклов: {cycles} (ошибок: {cycle_errors})\n"
+            "Среднее время цикла: {avg_cycle} сек\n"
+            "Запросов к Mercari: {requests} (ошибок: {request_errors})\n"
+            "Средняя задержка API: {avg_latency} сек\n"
+            "Найдено товаров: {items_found}\n\n"
+            "📨 <b>Уведомления</b>\n"
+            "Отправлено: {sent}\n"
+            "Ошибок: {failed}\n"
+            "Лимит 429: {rate_limited}\n"
+            "Очередь: {queue}\n"
+            "Outbox: {outbox}\n\n"
+            "👥 <b>Пользователи и подписки</b>\n"
+            "Пользователей: {users}\n"
+            "Активных URL: {urls_active} (всего: {urls_total})\n"
+            "Подписки: активных {subs_active}, ожидают {subs_pending}, истекло {subs_expired}\n"
+            "Планы: {plans}\n"
+            "Whitelist: {whitelist}\n"
+            "Выручка: {revenue}\n\n"
+            "🗄 <b>База данных</b>\n"
+            "Размер: {db_size} МБ\n"
+            "Товаров: {items_total} (сегодня: {items_today})\n"
+            "Seen: {seen_total}"
+        ),
+        "en": (
+            "📈 <b>Bot statistics</b>\n\n"
+            "🕐 Uptime: {uptime}\n\n"
+            "👀 <b>Monitoring</b>\n"
+            "Cycles: {cycles} (errors: {cycle_errors})\n"
+            "Average cycle time: {avg_cycle} sec\n"
+            "Mercari requests: {requests} (errors: {request_errors})\n"
+            "Average API latency: {avg_latency} sec\n"
+            "Items found: {items_found}\n\n"
+            "📨 <b>Notifications</b>\n"
+            "Sent: {sent}\n"
+            "Failed: {failed}\n"
+            "Rate limit 429: {rate_limited}\n"
+            "Queue: {queue}\n"
+            "Outbox: {outbox}\n\n"
+            "👥 <b>Users and subscriptions</b>\n"
+            "Users: {users}\n"
+            "Active URLs: {urls_active} (total: {urls_total})\n"
+            "Subscriptions: active {subs_active}, pending {subs_pending}, expired {subs_expired}\n"
+            "Plans: {plans}\n"
+            "Whitelist: {whitelist}\n"
+            "Revenue: {revenue}\n\n"
+            "🗄 <b>Database</b>\n"
+            "Size: {db_size} MB\n"
+            "Items: {items_total} (today: {items_today})\n"
+            "Seen: {seen_total}"
+        ),
     },
     "paused": {"ru": "⏸️ ПРИОСТАНОВЛЕН", "en": "⏸️ PAUSED"},
     "running": {"ru": "▶️ работает", "en": "▶️ running"},

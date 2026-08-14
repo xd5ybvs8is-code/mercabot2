@@ -309,6 +309,43 @@ class SubscriptionStorage:
         row = await cursor.fetchone()
         return row is not None
 
+    async def get_stats(self) -> dict:
+        """Агрегаты для админ-панели: статусы, планы, выручка, whitelist."""
+        by_status: dict[str, int] = {}
+        cursor = await self._db.conn.execute(
+            "SELECT status, COUNT(*) AS n FROM subscriptions GROUP BY status"
+        )
+        for row in await cursor.fetchall():
+            by_status[row["status"]] = row["n"]
+
+        by_plan: dict[str, int] = {}
+        cursor = await self._db.conn.execute(
+            "SELECT plan, COUNT(*) AS n FROM subscriptions "
+            "WHERE status IN ('pending', 'active') GROUP BY plan"
+        )
+        for row in await cursor.fetchall():
+            by_plan[row["plan"]] = row["n"]
+
+        revenue: dict[str, float] = {}
+        cursor = await self._db.conn.execute(
+            "SELECT paid_asset, SUM(CAST(paid_amount AS REAL)) AS total "
+            "FROM subscriptions WHERE status = 'active' AND paid_amount IS NOT NULL "
+            "AND paid_amount != '' GROUP BY paid_asset"
+        )
+        for row in await cursor.fetchall():
+            if row["paid_asset"]:
+                revenue[row["paid_asset"]] = float(row["total"] or 0.0)
+
+        cursor = await self._db.conn.execute("SELECT COUNT(*) AS n FROM whitelist")
+        whitelist_row = await cursor.fetchone()
+
+        return {
+            "by_status": by_status,
+            "by_plan": by_plan,
+            "revenue": revenue,
+            "whitelist": whitelist_row["n"] if whitelist_row else 0,
+        }
+
     @staticmethod
     async def _row_to_subscription(row: Any) -> SubscriptionRow | None:
         if row is None:

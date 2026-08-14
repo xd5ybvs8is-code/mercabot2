@@ -350,7 +350,17 @@ async def main() -> None:
     )
     watcher = MercariWatcher(settings, url_storage, telegram, client, devices, subs_storage, settings.admin_user_ids, metrics=metrics)
 
-    handlers = make_handlers(url_storage, watcher, telegram, settings.admin_user_ids, subs_storage)
+    handlers = make_handlers(
+        url_storage,
+        watcher,
+        telegram,
+        settings.admin_user_ids,
+        subs_storage,
+        metrics=metrics,
+        started_at=time.time(),
+        db_path=settings.db_path,
+        user_storage=user_storage,
+    )
     telegram.register_commands(handlers)
     logger.info("   Registered %s command handlers", len(handlers))
     for cmd in handlers:

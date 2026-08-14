@@ -38,3 +38,8 @@ class UserStorage:
             await conn.execute(
                 "DELETE FROM users WHERE chat_id = ?", (chat_id,),
             )
+
+    async def count(self) -> int:
+        cursor = await self._db.conn.execute("SELECT COUNT(*) FROM users")
+        row = await cursor.fetchone()
+        return row[0] if row else 0

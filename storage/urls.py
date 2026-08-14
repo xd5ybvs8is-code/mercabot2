@@ -328,3 +328,26 @@ class UrlStorage:
             )
             seen_count = cursor.rowcount
         return items_count, seen_count
+
+    async def get_stats(self) -> dict:
+        """Агрегаты для админ-панели: URL, items, seen, outbox."""
+        day_start = int(time.time()) - int(time.time()) % 86400
+
+        async def _count(sql: str, params: tuple = ()) -> int:
+            cursor = await self.conn.execute(sql, params)
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+        stats = {
+            "urls_total": await _count("SELECT COUNT(*) FROM search_urls"),
+            "urls_active": await _count(
+                "SELECT COUNT(*) FROM search_urls WHERE active = 1"
+            ),
+            "items_total": await _count("SELECT COUNT(*) FROM items"),
+            "items_today": await _count(
+                "SELECT COUNT(*) FROM items WHERE created_at >= ?", (day_start,)
+            ),
+            "seen_total": await _count("SELECT COUNT(*) FROM seen_items"),
+            "outbox": await _count("SELECT COUNT(*) FROM notification_outbox"),
+        }
+        return stats

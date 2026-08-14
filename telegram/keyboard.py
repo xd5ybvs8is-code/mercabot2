@@ -48,7 +48,8 @@ def build_admin_keyboard_markup(
     """Build admin-panel reply keyboard markup."""
     result: dict[str, Any] = {
         "keyboard": [
-            [{"text": button_text("status", language)}, {"text": button_text("reload_urls", language)}],
+            [{"text": button_text("status", language)}, {"text": button_text("admin_stats_btn", language)}],
+            [{"text": button_text("reload_urls", language)}],
             [{"text": button_text("pause", language)}, {"text": button_text("resume", language)}],
             [{"text": button_text("broadcast", language)}],
             [{"text": button_text("whitelist", language)}],
@@ -196,12 +197,14 @@ BUTTON_ACTIONS: dict[str, str] = {
     "🛠 Admin panel": "/admin_panel",
     # ── действия внутри админ-панели ──
     "📊 Статус бота": "/admin_status",
+    "📈 Статистика": "/admin_stats",
     "🔄 Перезагрузить URL": "/admin_reload",
     "⏸️ Пауза": "/admin_pause",
     "▶️ Продолжить": "/admin_resume",
     "📢 Рассылка всем": "__await_broadcast__",
     "🔙 Назад": "/admin_back",
     "📊 Bot status": "/admin_status",
+    "📈 Statistics": "/admin_stats",
     "🔄 Reload URLs": "/admin_reload",
     "⏸️ Pause": "/admin_pause",
     "▶️ Resume": "/admin_resume",
@@ -375,6 +378,7 @@ ADMIN_BUTTON_ACTIONS: frozenset[str] = frozenset(
     {
         "/admin_panel",
         "/admin_status",
+        "/admin_stats",
         "/admin_reload",
         "/admin_pause",
         "/admin_resume",

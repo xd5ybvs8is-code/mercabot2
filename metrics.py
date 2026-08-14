@@ -109,6 +109,32 @@ class MetricsCollector:
             result[k] = (self._key_name(k), float(h.sum))
         return result
 
+    def get_stats(self) -> dict[str, dict[str, float]]:
+        """Структурированная статистика для админ-панели.
+
+        Возвращает {metric_name: {label: value}} — лейблы собраны в
+        словарь (включая пустой ""), чтобы /admin_stats мог агрегировать
+        значения по статусам и считать средние по гистограммам.
+        """
+        result: dict[str, dict[str, float]] = {}
+        for key, value in self._counters.items():
+            result.setdefault(self._key_name(key), {})[self._label_value(key)] = float(value)
+        for key, value in self._gauges.items():
+            result.setdefault(self._key_name(key), {})[self._label_value(key)] = float(value)
+        for key, hist in self._histograms.items():
+            name = self._key_name(key)
+            result.setdefault(name, {})
+            result[name]["_sum"] = hist.sum
+            result[name]["_count"] = float(hist.count)
+        return result
+
+    @staticmethod
+    def _label_value(key: str) -> str:
+        parts = key.split(",")
+        if len(parts) == 1:
+            return ""
+        return ",".join(parts[1:])
+
     @staticmethod
     def _metric_key(name: str, labels: dict[str, str] | None) -> str:
         if not labels:
