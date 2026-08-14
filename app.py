@@ -67,6 +67,7 @@ async def _poll_invoices_loop(
     crypto_client: CryptoPayClient,
     subs_storage: SubscriptionStorage,
     telegram: TelegramNotifier,
+    url_storage: UrlStorage,
     interval: float = 30.0,
 ) -> None:
     """Periodically check pending invoices and activate paid subscriptions."""
@@ -116,6 +117,9 @@ async def _poll_invoices_loop(
                                 paid_asset=inv.asset,
                                 expires_at=expires_at,
                             )
+                            reactivated = await url_storage.reactivate_chat(sub.user_id)
+                            if reactivated > 0:
+                                logger.info("🔄 Subscription renewed for user %s — reactivated %s URL(s)", sub.user_id, reactivated)
                             language = await telegram.get_language(sub.user_id)
                             from datetime import datetime
                             expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
@@ -131,9 +135,15 @@ async def _poll_invoices_loop(
 async def _expire_subscriptions_loop(
     subs_storage: SubscriptionStorage,
     url_storage: UrlStorage,
+    telegram: TelegramNotifier,
     interval: float = 600.0,
 ) -> None:
-    """Periodically mark expired subscriptions and deactivate their URLs."""
+    """Периодически завершает истёкшие подписки и рассылает напоминания.
+
+    При истечении подписки пользователю отправляется уведомление с кнопкой
+    продления, после чего его поиски деактивируются. За 1 день до окончания
+    отправляется напоминание (один раз за период — флаг в БД).
+    """
     logger = logging.getLogger(__name__)
     logger.info("=" * 50)
     logger.info("⏰ SUBSCRIPTION EXPIRY CHECKER STARTED")
@@ -145,9 +155,23 @@ async def _expire_subscriptions_loop(
             if expired:
                 logger.info("⏰ %s expired subscription(s) found", len(expired))
             for sub in expired:
-                await subs_storage.mark_expired(sub.user_id)
-                await url_storage.deactivate_chat(sub.user_id)
-                logger.info("⏰ Expired subscription for user %s — URLs deactivated", sub.user_id)
+                try:
+                    await telegram.send_subscription_expired(sub.user_id)
+                    await subs_storage.mark_expired(sub.user_id)
+                    await url_storage.deactivate_chat(sub.user_id)
+                    logger.info("⏰ Expired subscription for user %s — URLs deactivated, user notified", sub.user_id)
+                except Exception:
+                    logger.exception("Failed to expire subscription for user %s", sub.user_id)
+
+            expiring = await subs_storage.get_expiring_soon()
+            if expiring:
+                logger.info("🔔 %s subscription(s) expiring within 1 day", len(expiring))
+            for sub in expiring:
+                try:
+                    await telegram.send_subscription_expiring_soon(sub.user_id)
+                    await subs_storage.mark_expiry_reminder_sent(sub.user_id)
+                except Exception:
+                    logger.exception("Failed to send expiry reminder to user %s", sub.user_id)
         except Exception:
             logger.exception("Expiry checker error")
         await asyncio.sleep(interval)
@@ -157,6 +181,7 @@ async def _poll_platega_loop(
     platega_client: PlategaClient,
     subs_storage: SubscriptionStorage,
     telegram: TelegramNotifier,
+    url_storage: UrlStorage,
     interval: float = 30.0,
 ) -> None:
     """Periodically check pending Platega payments and activate paid subscriptions."""
@@ -199,6 +224,9 @@ async def _poll_platega_loop(
                         paid_asset=txn.currency,
                         expires_at=expires_at,
                     )
+                    reactivated = await url_storage.reactivate_chat(sub.user_id)
+                    if reactivated > 0:
+                        logger.info("🔄 Subscription renewed for user %s — reactivated %s URL(s)", sub.user_id, reactivated)
                     language = await telegram.get_language(sub.user_id)
                     from datetime import datetime
                     expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
@@ -359,19 +387,19 @@ async def main() -> None:
     expiry_task: asyncio.Task[None] | None = None
     if crypto_client is not None:
         invoice_poll_task = asyncio.create_task(
-            _poll_invoices_loop(crypto_client, subs_storage, telegram),
+            _poll_invoices_loop(crypto_client, subs_storage, telegram, url_storage),
         )
         logger.info("✅ Invoice polling started (interval: 30s)")
 
     if crypto_client is not None or platega_client is not None:
         expiry_task = asyncio.create_task(
-            _expire_subscriptions_loop(subs_storage, url_storage),
+            _expire_subscriptions_loop(subs_storage, url_storage, telegram),
         )
         logger.info("✅ Subscription expiry checker started (interval: 10min)")
 
     if platega_client is not None:
         platega_poll_task = asyncio.create_task(
-            _poll_platega_loop(platega_client, subs_storage, telegram),
+            _poll_platega_loop(platega_client, subs_storage, telegram, url_storage),
         )
         logger.info("✅ Platega payment polling started (interval: 30s)")
 

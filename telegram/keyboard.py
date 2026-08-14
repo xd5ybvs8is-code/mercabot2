@@ -313,6 +313,13 @@ def build_terms_inline_keyboard(language: str = "ru") -> dict[str, Any]:
     ]}
 
 
+def build_renew_inline_keyboard(language: str = "ru") -> dict[str, Any]:
+    """Inline-кнопка «Продлить подписку» для уведомлений об окончании."""
+    return {"inline_keyboard": [[
+        {"text": button_text("subscription_extend_btn", language), "callback_data": "renew_choose"},
+    ]]}
+
+
 def build_subscription_inline_keyboard(language: str = "ru") -> dict[str, Any]:
     return {"inline_keyboard": [[
         {"text": button_text("sub_7d", language), "callback_data": "sub_7d"},

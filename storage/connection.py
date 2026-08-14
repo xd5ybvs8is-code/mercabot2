@@ -105,6 +105,10 @@ MIGRATE_PAYMENT_GATEWAY_SQL = """
 ALTER TABLE subscriptions ADD COLUMN payment_gateway TEXT DEFAULT 'cryptobot';
 """
 
+MIGRATE_EXPIRY_REMINDER_SENT_SQL = """
+ALTER TABLE subscriptions ADD COLUMN expiry_reminder_sent INTEGER;
+"""
+
 CREATE_TABLE_SUBSCRIPTIONS_SQL = """
 CREATE TABLE IF NOT EXISTS subscriptions (
     user_id       TEXT PRIMARY KEY,
@@ -195,6 +199,11 @@ class DatabaseConnection:
             await self._conn.execute(MIGRATE_PAYMENT_GATEWAY_SQL)
         except Exception:
             logger.debug("  • payment_gateway column already exists — skipping")
+        logger.debug("  • Running migration: expiry_reminder_sent column...")
+        try:
+            await self._conn.execute(MIGRATE_EXPIRY_REMINDER_SENT_SQL)
+        except Exception:
+            logger.debug("  • expiry_reminder_sent column already exists — skipping")
         await self._conn.commit()
         logger.info("=" * 50)
         logger.info("🗄️  DATABASE CONNECTED")

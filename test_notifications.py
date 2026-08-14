@@ -1,6 +1,8 @@
 import asyncio
+import time
 
 from storage.connection import DatabaseConnection
+from storage.subscriptions import SubscriptionStorage
 from storage.urls import SearchUrlRow, UrlStorage
 from telegram.messages import format_url_detail
 from telegram.sender import MessageSender, _FAILED, _OK
@@ -87,3 +89,46 @@ def test_url_detail_escapes_html_user_data() -> None:
 
     assert "<b>A &lt;b&gt; &amp; C</b>" in text
     assert "keyword=a&amp;sort=created_time" in text
+
+
+def test_expiry_reminder_flow(tmp_path) -> None:
+    asyncio.run(_test_expiry_reminder_flow(tmp_path))
+
+
+async def _test_expiry_reminder_flow(tmp_path) -> None:
+    db = DatabaseConnection(tmp_path / "state.db")
+    await db.connect()
+    storage = SubscriptionStorage(db)
+    now = int(time.time())
+
+    # Подписка, которой осталось 23 часа — попадает в напоминание «1 день».
+    await storage.create("u1", "7d", 1)
+    await storage.activate("u1", "7d", 1, "hash1", "100", "USDT", now + 23 * 3600)
+    # Trial на 12 часов — исключается из напоминаний.
+    await storage.activate_trial("u2", now + 12 * 3600)
+    # Подписка с остатком 2 дня — ещё рано напоминать.
+    await storage.create("u3", "7d", 2)
+    await storage.activate("u3", "7d", 2, "hash2", "100", "USDT", now + 48 * 3600)
+
+    expiring = await storage.get_expiring_soon()
+    assert [s.user_id for s in expiring] == ["u1"]
+
+    # После отметки напоминание не шлётся повторно.
+    await storage.mark_expiry_reminder_sent("u1")
+    assert await storage.get_expiring_soon() == []
+
+    # При продлении флаг сбрасывается — напоминание снова возможно.
+    await storage.create("u1", "7d", 3)
+    await storage.activate("u1", "7d", 3, "hash3", "100", "USDT", now + 20 * 3600)
+    expiring = await storage.get_expiring_soon()
+    assert [s.user_id for s in expiring] == ["u1"]
+
+    # Истёкшая подписка видна только через get_all_expired_active.
+    await storage.create("u1", "7d", 4)
+    await storage.activate("u1", "7d", 4, "hash4", "100", "USDT", now - 10)
+    assert [s.user_id for s in await storage.get_all_expired_active()] == ["u1"]
+    assert await storage.get_expiring_soon() == []
+    await storage.mark_expired("u1")
+    assert await storage.get_all_expired_active() == []
+
+    await db.close()

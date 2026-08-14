@@ -20,6 +20,7 @@ class SubscriptionRow:
     paid_amount: str | None
     paid_asset: str | None
     payment_gateway: str | None
+    expiry_reminder_sent: int | None
     created_at: int
     updated_at: int
 
@@ -106,6 +107,7 @@ class SubscriptionStorage:
                 "  payment_hash = ?,"
                 "  paid_amount = ?,"
                 "  paid_asset = ?,"
+                "  expiry_reminder_sent = NULL,"
                 "  updated_at = ? "
                 "WHERE user_id = ? AND invoice_id = ?",
                 (now, expires_at, payment_hash, paid_amount, paid_asset, now, user_id, invoice_id),
@@ -135,6 +137,38 @@ class SubscriptionStorage:
             if sub:
                 result.append(sub)
         return result
+
+    async def get_expiring_soon(self, seconds: int = 86400) -> list[SubscriptionRow]:
+        """Активные подписки, которым осталось не больше `seconds` (напоминание ещё не слали).
+
+        Trial-подписки исключены: они длятся всего 12 часов, и текст
+        «остался 1 день» для них неверен.
+        """
+        now = int(time.time())
+        cursor = await self._db.conn.execute(
+            "SELECT * FROM subscriptions WHERE status = 'active' "
+            "AND plan != 'trial' "
+            "AND expires_at > ? AND expires_at <= ? "
+            "AND (expiry_reminder_sent IS NULL OR expiry_reminder_sent = 0)",
+            (now, now + seconds),
+        )
+        rows = await cursor.fetchall()
+        result: list[SubscriptionRow] = []
+        for r in rows:
+            sub = await self._row_to_subscription(r)
+            if sub:
+                result.append(sub)
+        return result
+
+    async def mark_expiry_reminder_sent(self, user_id: str) -> None:
+        now = int(time.time())
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "UPDATE subscriptions SET expiry_reminder_sent = ? "
+                "WHERE user_id = ? AND status = 'active'",
+                (now, user_id),
+            )
+        logger.info("🔔 Expiry reminder marked sent for user %s", user_id)
 
     async def get_pending_invoices(self) -> list[SubscriptionRow]:
         cursor = await self._db.conn.execute(
@@ -228,6 +262,7 @@ class SubscriptionStorage:
                 "  status = 'active',"
                 "  subscribed_at = excluded.subscribed_at,"
                 "  expires_at = excluded.expires_at,"
+                "  expiry_reminder_sent = NULL,"
                 "  updated_at = excluded.updated_at",
                 (user_id, now, expires_at, now, now),
             )
@@ -289,6 +324,7 @@ class SubscriptionStorage:
             paid_amount=row["paid_amount"],
             paid_asset=row["paid_asset"],
             payment_gateway=row["payment_gateway"],
+            expiry_reminder_sent=row["expiry_reminder_sent"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

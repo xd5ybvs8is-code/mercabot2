@@ -228,6 +228,14 @@ TEXTS: dict[str, dict[Language, str]] = {
         "ru": "💎 Продлить подписку",
         "en": "💎 Extend Subscription",
     },
+    "subscription_expired": {
+        "ru": "⚠️ Подписка закончилась\n\nВаши поиски временно приостановлены.\nПосле продления они продолжат работать автоматически.",
+        "en": "⚠️ Subscription has ended\n\nYour searches are temporarily paused.\nAfter renewal they will continue working automatically.",
+    },
+    "subscription_expiring_soon": {
+        "ru": "⚠️ Ваша подписка закончится через 1 день.\n\nПродлите её, чтобы поиски продолжили работать без перерыва.",
+        "en": "⚠️ Your subscription expires in 1 day.\n\nExtend it to keep your searches running without interruption.",
+    },
     "trial_button": {
         "ru": "🎁 Пробный доступ (12 часов)",
         "en": "🎁 Trial Access (12 hours)",

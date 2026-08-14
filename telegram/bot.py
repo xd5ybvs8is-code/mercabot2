@@ -22,6 +22,7 @@ from telegram.keyboard import (
     build_terms_inline_keyboard,
     build_subscription_inline_keyboard,
     build_sbp_subscription_inline_keyboard,
+    build_renew_inline_keyboard,
     build_trial_keyboard,
     build_invoice_keyboard,
     build_sbp_invoice_keyboard,
@@ -203,6 +204,35 @@ class TelegramNotifier:
             placeholder=placeholder,
             is_subscribed=is_subscribed,
         )
+        return True
+
+    async def send_subscription_expired(self, chat_id: str) -> bool:
+        """Уведомление об окончании подписки с инлайн-кнопкой продления."""
+        language = await self._get_language(chat_id)
+        payload = {
+            "chat_id": chat_id,
+            "text": tr("subscription_expired", language),
+            "parse_mode": "HTML",
+            "reply_markup": build_renew_inline_keyboard(language),
+        }
+        result = await self._client.call_api_json("sendMessage", payload)
+        if result is None or not result.get("ok"):
+            return False
+        logger.info("📪 Subscription expired notification sent to %s", chat_id)
+        return True
+
+    async def send_subscription_expiring_soon(self, chat_id: str) -> bool:
+        """Напоминание: подписка закончится через 1 день."""
+        language = await self._get_language(chat_id)
+        payload = {
+            "chat_id": chat_id,
+            "text": tr("subscription_expiring_soon", language),
+            "parse_mode": "HTML",
+        }
+        result = await self._client.call_api_json("sendMessage", payload)
+        if result is None or not result.get("ok"):
+            return False
+        logger.info("🔔 Expiring-soon reminder sent to %s", chat_id)
         return True
 
     async def send_item(
@@ -1022,6 +1052,10 @@ class TelegramNotifier:
                     paid_asset=txn.currency,
                     expires_at=expires_at,
                 )
+                if self._url_storage is not None:
+                    reactivated = await self._url_storage.reactivate_chat(chat_id)
+                    if reactivated > 0:
+                        logger.info("🔄 Subscription renewed for user %s — reactivated %s URL(s)", chat_id, reactivated)
                 from datetime import datetime as _dt_sbp
                 expires_str = _dt_sbp.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
                 status_text = tr("sbp_paid_now", language, plan=self._plan_label(sub.plan, language), expires=expires_str)
@@ -1065,6 +1099,10 @@ class TelegramNotifier:
                         paid_asset=inv.asset,
                         expires_at=expires_at,
                     )
+                    if self._url_storage is not None:
+                        reactivated = await self._url_storage.reactivate_chat(chat_id)
+                        if reactivated > 0:
+                            logger.info("🔄 Subscription renewed for user %s — reactivated %s URL(s)", chat_id, reactivated)
                     from datetime import datetime as _dt
                     expires_str = _dt.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
                     status_text = tr("invoice_paid_now", language, plan=self._plan_label(sub.plan, language), expires=expires_str)
@@ -1128,6 +1166,10 @@ class TelegramNotifier:
 
         expires_at = int(time.time()) + 12 * 3600
         await self._subs_storage.activate_trial(chat_id, expires_at)
+        if self._url_storage is not None:
+            reactivated = await self._url_storage.reactivate_chat(chat_id)
+            if reactivated > 0:
+                logger.info("🔄 Trial activated for user %s — reactivated %s URL(s)", chat_id, reactivated)
 
         trial_msg_id = self._trial_msg_ids.pop(chat_id, None) or msg_id
         if trial_msg_id:
@@ -1233,6 +1275,10 @@ class TelegramNotifier:
                 paid_asset=paid.asset,
                 expires_at=expires_at,
             )
+            if self._url_storage is not None:
+                reactivated = await self._url_storage.reactivate_chat(chat_id)
+                if reactivated > 0:
+                    logger.info("🔄 Subscription renewed for user %s — reactivated %s URL(s)", chat_id, reactivated)
             from datetime import datetime
             expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
             await self._client.answer_callback_query(cb_id)
@@ -1352,6 +1398,10 @@ class TelegramNotifier:
                 paid_asset=txn.currency,
                 expires_at=expires_at,
             )
+            if self._url_storage is not None:
+                reactivated = await self._url_storage.reactivate_chat(chat_id)
+                if reactivated > 0:
+                    logger.info("🔄 Subscription renewed for user %s — reactivated %s URL(s)", chat_id, reactivated)
             from datetime import datetime
             expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
             await self._client.answer_callback_query(cb_id)
