@@ -6,6 +6,7 @@ from storage.connection import DatabaseConnection
 from storage.subscriptions import SubscriptionStorage
 from storage.urls import UrlStorage
 from storage.users import UserStorage
+from telegram.handlers import _metric_error_sum, _metric_sum
 from telegram.messages import format_admin_stats
 
 
@@ -93,8 +94,8 @@ def test_metrics_get_stats() -> None:
 async def _test_metrics_get_stats() -> None:
     metrics = MetricsCollector()
     await metrics.inc_counter("mercabot_watch_cycle_total", delta=3)
-    await metrics.inc_counter("mercabot_mercari_requests_total", labels={"status": "ok"})
-    await metrics.inc_counter("mercabot_mercari_requests_total", labels={"status": "ok"})
+    await metrics.inc_counter("mercabot_mercari_requests_total", labels={"status": "200"})
+    await metrics.inc_counter("mercabot_mercari_requests_total", labels={"status": "200"})
     await metrics.inc_counter("mercabot_mercari_requests_total", labels={"status": "timeout"})
     await metrics.observe_histogram("mercabot_watch_cycle_duration_seconds", 2.0)
     await metrics.observe_histogram("mercabot_watch_cycle_duration_seconds", 4.0)
@@ -102,10 +103,32 @@ async def _test_metrics_get_stats() -> None:
     stats = metrics.get_stats()
 
     assert stats["mercabot_watch_cycle_total"][""] == 3.0
-    assert stats["mercabot_mercari_requests_total"]["status=ok"] == 2.0
+    assert stats["mercabot_mercari_requests_total"]["status=200"] == 2.0
     assert stats["mercabot_mercari_requests_total"]["status=timeout"] == 1.0
     assert stats["mercabot_watch_cycle_duration_seconds"]["_sum"] == 6.0
     assert stats["mercabot_watch_cycle_duration_seconds"]["_count"] == 2.0
+
+
+def test_request_error_sum_excludes_success() -> None:
+    """Успешные запросы (status=200) не должны попадать в «ошибки»."""
+    _run(_test_request_error_sum_excludes_success())
+
+
+async def _test_request_error_sum_excludes_success() -> None:
+    metrics = MetricsCollector()
+    await metrics.inc_counter("mercabot_mercari_requests_total", labels={"status": "200"})
+    await metrics.inc_counter("mercabot_mercari_requests_total", labels={"status": "200"})
+    await metrics.inc_counter("mercabot_mercari_requests_total", labels={"status": "200"})
+    await metrics.inc_counter("mercabot_mercari_requests_total", labels={"status": "429"})
+    await metrics.inc_counter("mercabot_mercari_requests_total", labels={"status": "timeout"})
+    await metrics.inc_counter("mercabot_mercari_requests_total", labels={"status": "network_error"})
+
+    stats = metrics.get_stats()
+    total = _metric_sum(stats, "mercabot_mercari_requests_total")
+    errors = _metric_error_sum(stats, "mercabot_mercari_requests_total")
+
+    assert total == 6.0
+    assert errors == 3.0
 
 
 def test_admin_stats_message_renders() -> None:

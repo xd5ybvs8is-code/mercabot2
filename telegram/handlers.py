@@ -38,6 +38,54 @@ def _parse_add_input(text: str) -> tuple[str, str | None]:
     return text.strip(), None
 
 
+def _metric(metric_stats: dict, name: str) -> float:
+    """Среднее для гистограмм, сумма для счётчиков/гаугов."""
+    values = metric_stats.get(name, {})
+    if not values:
+        return 0.0
+    if "_sum" in values:
+        count = values.get("_count", 0.0)
+        return values["_sum"] / count if count > 0 else 0.0
+    return sum(values.values())
+
+
+def _metric_sum(metric_stats: dict, name: str) -> float:
+    values = metric_stats.get(name, {})
+    return sum(v for k, v in values.items() if not k.startswith("_"))
+
+
+def _metric_error_sum(metric_stats: dict, name: str) -> float:
+    """Сумма значений с лейблами-статусами, кроме успешных.
+
+    Успех помечается как status=200 (mercari/client.py), поэтому
+    ошибками считаются все остальные статусы: HTTP-коды ошибок,
+    network_error, timeout, unknown.
+    """
+    values = metric_stats.get(name, {})
+    return sum(
+        v for k, v in values.items()
+        if not k.startswith("_") and "status=200" not in k and "status=ok" not in k
+    )
+
+
+def _format_uptime(seconds: float, language: str) -> str:
+    total = max(0, int(seconds))
+    days, total = divmod(total, 86400)
+    hours, total = divmod(total, 3600)
+    minutes = total // 60
+    if language == "en":
+        if days:
+            return f"{days}d {hours}h {minutes}m"
+        if hours:
+            return f"{hours}h {minutes}m"
+        return f"{minutes}m"
+    if days:
+        return f"{days}д {hours}ч {minutes}м"
+    if hours:
+        return f"{hours}ч {minutes}м"
+    return f"{minutes}м"
+
+
 def make_handlers(
     url_storage: UrlStorage,
     watcher: MercariWatcher,
@@ -56,42 +104,6 @@ def make_handlers(
 
     def _is_admin(user_id: str) -> bool:
         return user_id in admin_user_ids
-
-    def _metric(metric_stats: dict, name: str) -> float:
-        values = metric_stats.get(name, {})
-        if not values:
-            return 0.0
-        if "_sum" in values:
-            count = values.get("_count", 0.0)
-            return values["_sum"] / count if count > 0 else 0.0
-        return sum(values.values())
-
-    def _metric_sum(metric_stats: dict, name: str) -> float:
-        values = metric_stats.get(name, {})
-        return sum(v for k, v in values.items() if not k.startswith("_"))
-
-    def _metric_error_sum(metric_stats: dict, name: str) -> float:
-        """Сумма значений с лейблами-статусами, кроме status=ok."""
-        values = metric_stats.get(name, {})
-        return sum(v for k, v in values.items() if "status=ok" not in k and not k.startswith("_"))
-
-    @staticmethod
-    def _format_uptime(seconds: float, language: str) -> str:
-        total = max(0, int(seconds))
-        days, total = divmod(total, 86400)
-        hours, total = divmod(total, 3600)
-        minutes = total // 60
-        if language == "en":
-            if days:
-                return f"{days}d {hours}h {minutes}m"
-            if hours:
-                return f"{hours}h {minutes}m"
-            return f"{minutes}m"
-        if days:
-            return f"{days}д {hours}ч {minutes}м"
-        if hours:
-            return f"{hours}ч {minutes}м"
-        return f"{minutes}м"
 
     async def _check_subscription(chat_id: str, user_id: str, language: str) -> str | None:
         """Returns None if access allowed, or an error message if not."""
