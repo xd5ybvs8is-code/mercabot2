@@ -70,6 +70,22 @@ def _build_keyword_search_url(
     return "https://jp.mercari.com/en/search?" + "&".join(f"{k}={v}" for k, v in params)
 
 
+def _keyword_search_name(
+    keyword: str,
+    price_min: int = 0,
+    price_max: int = 0,
+    language: str = "ru",
+) -> str:
+    """Имя поиска: ключевое слово + фильтр цены («keyword, до X ¥» и т.п.)."""
+    if price_min and price_max:
+        return f"{keyword}, {price_min}-{price_max} ¥"
+    if price_max:
+        return f"{keyword}, {tr('price_name_up_to', language, price=price_max)}"
+    if price_min:
+        return f"{keyword}, {tr('price_name_from', language, price=price_min)}"
+    return keyword
+
+
 def _parse_single_price(text: str) -> int | None:
     """Parse a single integer price. Returns None if not a plain integer."""
     value = text.strip().replace(",", "").replace(" ", "")
@@ -608,8 +624,9 @@ class TelegramNotifier:
                 return
             del self._awaiting[chat_id]
             url = _build_keyword_search_url(keyword, price_max=price)
+            name = _keyword_search_name(keyword, price_max=price, language=language)
             logger.info("   → User %s set max price %s for keyword '%s'", chat_id, price, keyword)
-            await self._run_handler("/add", f"{url} | {keyword} | keyword", chat_id, user_id)
+            await self._run_handler("/add", f"{url} | {name} | keyword", chat_id, user_id)
             return
 
         if state and state.get("phase") == "price_min":
@@ -626,8 +643,9 @@ class TelegramNotifier:
                 return
             del self._awaiting[chat_id]
             url = _build_keyword_search_url(keyword, price_min=price)
+            name = _keyword_search_name(keyword, price_min=price, language=language)
             logger.info("   → User %s set min price %s for keyword '%s'", chat_id, price, keyword)
-            await self._run_handler("/add", f"{url} | {keyword} | keyword", chat_id, user_id)
+            await self._run_handler("/add", f"{url} | {name} | keyword", chat_id, user_id)
             return
 
         if state and state.get("phase") == "price_range":
@@ -654,8 +672,9 @@ class TelegramNotifier:
                 return
             del self._awaiting[chat_id]
             url = _build_keyword_search_url(keyword, price_min=lo, price_max=hi)
+            name = _keyword_search_name(keyword, price_min=lo, price_max=hi, language=language)
             logger.info("   → User %s set price range %s-%s for keyword '%s'", chat_id, lo, hi, keyword)
-            await self._run_handler("/add", f"{url} | {keyword} | keyword", chat_id, user_id)
+            await self._run_handler("/add", f"{url} | {name} | keyword", chat_id, user_id)
             return
 
         if state and state.get("phase") == "rename":

@@ -438,6 +438,8 @@ TEXTS: dict[str, dict[Language, str]] = {
     "price_up_to": {"ru": "💴 До цены", "en": "💴 Up to price"},
     "price_from": {"ru": "💴 От цены", "en": "💴 From price"},
     "price_between": {"ru": "💴 От и до", "en": "💴 From and to"},
+    "price_name_up_to": {"ru": "до {price} ¥", "en": "up to {price} ¥"},
+    "price_name_from": {"ru": "от {price} ¥", "en": "from {price} ¥"},
     "enter_price_max": {
         "ru": "💴 Введите максимальную цену (до) в йенах.\n\nДопустимый диапазон: 300 – 9 999 999 йен.",
         "en": "💴 Enter the maximum price (up to) in yen.\n\nAllowed range: 300 – 9,999,999 yen.",
