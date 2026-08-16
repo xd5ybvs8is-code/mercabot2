@@ -218,6 +218,18 @@ def make_handlers(
 
         url_id = int(id_part)
         name = new_name.strip()
+
+        target = next(
+            (r for r in await url_storage.get_user_urls(chat_id) if r.id == url_id),
+            None,
+        )
+        if target is None:
+            logger.warning("   ⚠️  URL #%s not found for user %s", url_id, chat_id)
+            return text("url_not_found", language)
+        if target.source == "keyword":
+            logger.warning("   ⚠️  Refusing to rename keyword-based URL #%s for user %s", url_id, chat_id)
+            return text("rename_not_allowed", language)
+
         if await url_storage.rename(url_id, chat_id, name):
             logger.info("   ✅ URL #%s renamed to '%s' for user %s", url_id, name, chat_id)
             return text("url_renamed", language, name=escape(name))

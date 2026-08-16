@@ -114,6 +114,10 @@ TEXTS: dict[str, dict[Language, str]] = {
         "en": "✅ URL selected (<b>{name}</b>).",
     },
     "rename_cancelled": {"ru": "❌ Переименование отменено.", "en": "❌ Rename cancelled."},
+    "rename_not_allowed": {
+        "ru": "❌ URL, добавленный по ключевому слову, переименовать нельзя — имя не меняет сам поисковый URL.",
+        "en": "❌ A keyword-based URL cannot be renamed — the name does not change the search URL itself.",
+    },
     "delete_confirm": {"ru": "🗑 Удалить URL <b>{name}</b>?", "en": "🗑 Delete URL <b>{name}</b>?"},
     "deleted": {"ru": "✅ URL <b>{name}</b> удалён.", "en": "✅ URL <b>{name}</b> deleted."},
     "not_found_named": {"ru": "❌ URL <b>{name}</b> не найден.", "en": "❌ URL <b>{name}</b> not found."},

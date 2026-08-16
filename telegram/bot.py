@@ -666,6 +666,17 @@ class TelegramNotifier:
             if self._url_storage is None:
                 await self.send_message(chat_id, tr("internal_error", language))
                 return
+            target = next(
+                (r for r in await self._url_storage.get_user_urls(chat_id) if r.id == url_id),
+                None,
+            )
+            if target is None:
+                logger.warning("   ⚠️  URL #%s not found for user %s", url_id, chat_id)
+                await self.send_message(chat_id, tr("url_not_found", language))
+                return
+            if target.source == "keyword":
+                await self.send_message(chat_id, tr("rename_not_allowed", language))
+                return
             if await self._url_storage.rename(url_id, chat_id, new_name):
                 logger.info("   ✅ URL #%s renamed to '%s' for user %s", url_id, new_name, chat_id)
                 await self.send_message(chat_id, tr("url_renamed", language, name=escape(new_name)))
@@ -1647,7 +1658,7 @@ class TelegramNotifier:
                 await self._client.answer_callback_query(cb_id, tr("url_not_found", language), show_alert=True)
                 return
             detail_text = await format_url_detail(selected, language)
-            markup = build_url_detail_keyboard(url_id, language)
+            markup = build_url_detail_keyboard(url_id, language, source=selected.source)
             if msg_id:
                 await self._client.edit_message_text(
                     chat_id, msg_id,
@@ -1673,10 +1684,11 @@ class TelegramNotifier:
                 await self._client.answer_callback_query(cb_id, tr("internal_error", language), show_alert=True)
                 return
             urls = await self._url_storage.get_user_urls(chat_id)
-            if not urls:
+            renameable = [r for r in urls if r.source != "keyword"]
+            if not urls or not renameable:
                 if msg_id:
                     await self._client.edit_message_text(
-                        chat_id, msg_id, tr("no_urls", language),
+                        chat_id, msg_id, tr("rename_not_allowed", language),
                     )
                 await self._client.answer_callback_query(cb_id)
                 return
@@ -1707,6 +1719,9 @@ class TelegramNotifier:
                     break
             if selected is None:
                 await self._client.answer_callback_query(cb_id, tr("url_not_found", language), show_alert=True)
+                return
+            if selected.source == "keyword":
+                await self._client.answer_callback_query(cb_id, tr("rename_not_allowed", language), show_alert=True)
                 return
             self._awaiting[chat_id] = {"phase": "rename", "url_id": str(url_id)}
             logger.info("   ✏️  Rename flow started for URL #%s by user %s", url_id, chat_id)

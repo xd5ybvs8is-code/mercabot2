@@ -273,14 +273,20 @@ def build_list_items_inline_keyboard_paginated(
     return {"inline_keyboard": keyboard}
 
 
-def build_url_detail_keyboard(url_id: int, language: str = "ru") -> dict[str, Any]:
-    """Inline-клавиатура для деталей URL: Переименовать, Удалить, Назад."""
-    keyboard = [[
-        {"text": "✏️ Rename" if language == "en" else "✏️ Переименовать", "callback_data": f"rnm_{url_id}"},
-        {"text": "🗑 Delete" if language == "en" else "🗑 Удалить", "callback_data": f"del_{url_id}"},
-    ], [
-        {"text": "🔙 Back" if language == "en" else "🔙 Назад", "callback_data": "list_back"},
-    ]]
+def build_url_detail_keyboard(url_id: int, language: str = "ru", source: str = "url") -> dict[str, Any]:
+    """Inline-клавиатура для деталей URL: Переименовать, Удалить, Назад.
+
+    Для URL, добавленных по ключевому слову, кнопка переименования скрыта:
+    имя не влияет на сам поисковый URL.
+    """
+    action_row: list[dict[str, str]] = []
+    if source != "keyword":
+        action_row.append({"text": "✏️ Rename" if language == "en" else "✏️ Переименовать", "callback_data": f"rnm_{url_id}"})
+    action_row.append({"text": "🗑 Delete" if language == "en" else "🗑 Удалить", "callback_data": f"del_{url_id}"})
+    keyboard = [
+        action_row,
+        [{"text": "🔙 Back" if language == "en" else "🔙 Назад", "callback_data": "list_back"}],
+    ]
     return {"inline_keyboard": keyboard}
 
 
@@ -288,6 +294,8 @@ def build_rename_inline_keyboard(urls: list, language: str = "ru") -> dict[str, 
     """Inline-клавиатура со списком URL пользователя для переименования."""
     keyboard = []
     for row in urls:
+        if getattr(row, "source", "url") == "keyword":
+            continue
         keyboard.append([{
             "text": row.name,
             "callback_data": f"rnm_{row.id}",
