@@ -210,8 +210,9 @@ class DatabaseConnection:
             await self._conn.execute(MIGRATE_URL_SOURCE_SQL)
         except Exception:
             logger.debug("  • source column already exists — skipping")
-        logger.debug("  • Backfilling source for existing URLs...")
-        await self._conn.execute(BACKFILL_URL_SOURCE_SQL)
+        else:
+            logger.debug("  • Backfilling source for existing URLs...")
+            await self._conn.execute(BACKFILL_URL_SOURCE_SQL)
         logger.debug("  • Running migration: payment_gateway column...")
         try:
             await self._conn.execute(MIGRATE_PAYMENT_GATEWAY_SQL)
