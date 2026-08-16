@@ -544,7 +544,7 @@ class TelegramNotifier:
                 url = _build_keyword_search_url(keyword)
                 del self._awaiting[chat_id]
                 logger.info("   → User %s chose all products for keyword '%s'", chat_id, keyword)
-                await self._run_handler("/add", f"{url} | {keyword}", chat_id, user_id)
+                await self._run_handler("/add", f"{url} | {keyword} | keyword", chat_id, user_id)
                 return
             logger.warning("   ⚠️  Unexpected input '%s' in keyword_filter phase from user %s", text, chat_id)
             await self.send_message(
@@ -609,7 +609,7 @@ class TelegramNotifier:
             del self._awaiting[chat_id]
             url = _build_keyword_search_url(keyword, price_max=price)
             logger.info("   → User %s set max price %s for keyword '%s'", chat_id, price, keyword)
-            await self._run_handler("/add", f"{url} | {keyword}", chat_id, user_id)
+            await self._run_handler("/add", f"{url} | {keyword} | keyword", chat_id, user_id)
             return
 
         if state and state.get("phase") == "price_min":
@@ -627,7 +627,7 @@ class TelegramNotifier:
             del self._awaiting[chat_id]
             url = _build_keyword_search_url(keyword, price_min=price)
             logger.info("   → User %s set min price %s for keyword '%s'", chat_id, price, keyword)
-            await self._run_handler("/add", f"{url} | {keyword}", chat_id, user_id)
+            await self._run_handler("/add", f"{url} | {keyword} | keyword", chat_id, user_id)
             return
 
         if state and state.get("phase") == "price_range":
@@ -655,7 +655,7 @@ class TelegramNotifier:
             del self._awaiting[chat_id]
             url = _build_keyword_search_url(keyword, price_min=lo, price_max=hi)
             logger.info("   → User %s set price range %s-%s for keyword '%s'", chat_id, lo, hi, keyword)
-            await self._run_handler("/add", f"{url} | {keyword}", chat_id, user_id)
+            await self._run_handler("/add", f"{url} | {keyword} | keyword", chat_id, user_id)
             return
 
         if state and state.get("phase") == "rename":

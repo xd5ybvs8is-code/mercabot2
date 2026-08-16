@@ -14,6 +14,7 @@ class SearchUrlRow(NamedTuple):
     user_chat_id: str
     active: bool
     added_at: int
+    source: str
 
 
 class PendingNotification(NamedTuple):
@@ -48,20 +49,33 @@ class UrlStorage:
 
     # ── search_urls ──────────────────────────────────────────────
 
-    async def add(self, url: str, user_chat_id: str, name: str | None = None) -> tuple[bool, int]:
+    async def add(
+        self,
+        url: str,
+        user_chat_id: str,
+        name: str | None = None,
+        source: str = "url",
+    ) -> tuple[bool, int]:
         """Add URL for user. Returns (was_new, id).
+
+        source — как URL был добавлен: 'url' (прямая ссылка) или 'keyword'.
+        При дубликате (UNIQUE url+user_chat_id) сохраняется первая запись.
 
         Оборачивает INSERT в собственную transaction(): это точечная
         операция из обработчика команды Telegram, вне цикла watcher'а.
         """
         if not name:
             name = url
-        logger.info("📝 Adding URL: user=%s, name='%s', url=%s", user_chat_id, name, url[:80])
+        logger.info(
+            "📝 Adding URL: user=%s, name='%s', source='%s', url=%s",
+            user_chat_id, name, source, url[:80],
+        )
         async with self._db.transaction() as conn:
             try:
                 cursor = await conn.execute(
-                    "INSERT INTO search_urls (url, name, user_chat_id, active, added_at) VALUES (?, ?, ?, 1, ?)",
-                    (url, name, user_chat_id, int(time.time())),
+                    "INSERT INTO search_urls (url, name, user_chat_id, active, added_at, source) "
+                    "VALUES (?, ?, ?, 1, ?, ?)",
+                    (url, name, user_chat_id, int(time.time()), source),
                 )
                 logger.info("✅ URL added successfully: id=%s, name='%s'", cursor.lastrowid, name)
                 return True, cursor.lastrowid
@@ -96,14 +110,14 @@ class UrlStorage:
 
     async def get_active_urls(self) -> list[SearchUrlRow]:
         rows = await self.conn.execute_fetchall(
-            "SELECT id, url, name, user_chat_id, active, added_at FROM search_urls WHERE active = 1 ORDER BY id"
+            "SELECT id, url, name, user_chat_id, active, added_at, source FROM search_urls WHERE active = 1 ORDER BY id"
         )
         logger.debug("📋 get_active_urls: %s active URL(s) found", len(rows))
         return [SearchUrlRow(*row) for row in rows]
 
     async def get_user_urls(self, user_chat_id: str) -> list[SearchUrlRow]:
         rows = await self.conn.execute_fetchall(
-            "SELECT id, url, name, user_chat_id, active, added_at FROM search_urls WHERE user_chat_id = ? ORDER BY id",
+            "SELECT id, url, name, user_chat_id, active, added_at, source FROM search_urls WHERE user_chat_id = ? ORDER BY id",
             (user_chat_id,),
         )
         logger.debug("📋 get_user_urls(%s): %s URL(s) found", user_chat_id, len(rows))

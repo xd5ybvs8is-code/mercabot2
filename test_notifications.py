@@ -83,12 +83,32 @@ def test_url_detail_escapes_html_user_data() -> None:
         "chat-1",
         True,
         0,
+        "url",
     )
 
     text = asyncio.run(format_url_detail(row))
 
     assert "<b>A &lt;b&gt; &amp; C</b>" in text
     assert "keyword=a&amp;sort=created_time" in text
+
+
+def test_url_detail_source_label() -> None:
+    def make_row(source: str) -> SearchUrlRow:
+        return SearchUrlRow(
+            1,
+            "https://jp.mercari.com/en/search?keyword=a&sort=created_time",
+            "kw",
+            "chat-1",
+            True,
+            0,
+            source,
+        )
+
+    keyword_text = asyncio.run(format_url_detail(make_row("keyword")))
+    assert "ключевому слову" in keyword_text
+
+    url_text = asyncio.run(format_url_detail(make_row("url")))
+    assert "прямой ссылке" in url_text
 
 
 def test_expiry_reminder_flow(tmp_path) -> None:

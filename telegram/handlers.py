@@ -30,12 +30,20 @@ logger = logging.getLogger(__name__)
 CommandHandler = "callable"
 
 
-def _parse_add_input(text: str) -> tuple[str, str | None]:
-    """Parse input: 'url | name' or just 'url'. Returns (url, name)."""
-    if " | " in text:
-        parts = text.split(" | ", maxsplit=1)
-        return parts[0].strip(), parts[1].strip()
-    return text.strip(), None
+def _parse_add_input(text: str) -> tuple[str, str | None, str | None]:
+    """Parse input: 'url', 'url | name' or 'url | name | source'.
+
+    Returns (url, name, source). Третий сегмент распознаётся как источник
+    только если он равен 'keyword' или 'url', иначе считается частью имени.
+    """
+    if " | " not in text:
+        return text.strip(), None, None
+    parts = text.split(" | ", maxsplit=2)
+    url = parts[0].strip()
+    if len(parts) == 3 and parts[2].strip() in {"keyword", "url"}:
+        return url, parts[1].strip(), parts[2].strip()
+    name = " | ".join(p.strip() for p in parts[1:]).strip()
+    return url, name, None
 
 
 def _metric(metric_stats: dict, name: str) -> float:
@@ -134,7 +142,7 @@ def make_handlers(
             logger.warning("   ⚠️  Empty input from user %s", chat_id)
             return text("provide_search", language)
 
-        clean_url, name = _parse_add_input(url)
+        clean_url, name, source = _parse_add_input(url)
         if not clean_url:
             return text("provide_search", language)
 
@@ -147,7 +155,12 @@ def make_handlers(
             )
             if not name:
                 name = keyword
+            if source is None:
+                source = "keyword"
             logger.info("   🔤 Keyword '%s' converted to search URL", keyword)
+
+        if source is None:
+            source = "url"
 
         if not clean_url.startswith("https://jp.mercari.com"):
             logger.warning("   ⚠️  Invalid domain from user %s: %s", chat_id, clean_url[:50])
@@ -163,7 +176,7 @@ def make_handlers(
         clean_url = normalize_search_url(clean_url)
         logger.debug("   🔧 Normalized URL: %s", clean_url)
 
-        is_new, url_id = await url_storage.add(clean_url, chat_id, name)
+        is_new, url_id = await url_storage.add(clean_url, chat_id, name, source)
         if is_new:
             watcher.force_reload()
             display_name = name or clean_url

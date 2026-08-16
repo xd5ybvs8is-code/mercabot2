@@ -1,5 +1,4 @@
 from html import escape
-from urllib.parse import parse_qs, urlparse
 from datetime import datetime
 
 from models.item import Item
@@ -44,10 +43,8 @@ async def format_url_list(
 
 
 async def format_url_detail(row: SearchUrlRow, language: str = "ru") -> str:
-    parsed = urlparse(row.url)
-    params = parse_qs(parsed.query)
     added_by = text(
-        "keyword_source" if "keyword" in params else "url_source", language,
+        "keyword_source" if row.source == "keyword" else "url_source", language,
     )
     return text(
         "url_detail", language,

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS search_urls (
     user_chat_id TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
     added_at INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'url',
     UNIQUE(url, user_chat_id)
 );
 """
@@ -99,6 +100,16 @@ FROM notification_outbox;
 
 MIGRATE_DEACTIVATED_AT_SQL = """
 ALTER TABLE search_urls ADD COLUMN deactivated_at INTEGER;
+"""
+
+MIGRATE_URL_SOURCE_SQL = """
+ALTER TABLE search_urls ADD COLUMN source TEXT NOT NULL DEFAULT 'url';
+"""
+
+# Существующие строки созданы до колонки source — размечаем старым
+# эвристиком (по наличию параметра keyword в URL).
+BACKFILL_URL_SOURCE_SQL = """
+UPDATE search_urls SET source = 'keyword' WHERE url LIKE '%keyword=%';
 """
 
 MIGRATE_PAYMENT_GATEWAY_SQL = """
@@ -194,6 +205,13 @@ class DatabaseConnection:
             await self._conn.execute(MIGRATE_DEACTIVATED_AT_SQL)
         except Exception:
             logger.debug("  • deactivated_at column already exists — skipping")
+        logger.debug("  • Running migration: source column...")
+        try:
+            await self._conn.execute(MIGRATE_URL_SOURCE_SQL)
+        except Exception:
+            logger.debug("  • source column already exists — skipping")
+        logger.debug("  • Backfilling source for existing URLs...")
+        await self._conn.execute(BACKFILL_URL_SOURCE_SQL)
         logger.debug("  • Running migration: payment_gateway column...")
         try:
             await self._conn.execute(MIGRATE_PAYMENT_GATEWAY_SQL)
