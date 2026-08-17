@@ -61,6 +61,7 @@ TEXTS: dict[str, dict[Language, str]] = {
         ),
     },
     "cancelled": {"ru": "❌ Действие отменено.", "en": "❌ Action cancelled."},
+    "back_to_main": {"ru": "↩️ Главное меню", "en": "↩️ Main menu"},
     "no_permission": {
         "ru": "⛔ У вас нет прав администратора для этого действия.",
         "en": "⛔ You do not have administrator permissions for this action.",

@@ -162,6 +162,9 @@ class TelegramNotifier:
         # Выбранный способ оплаты (по chat_id) — "cryptobot" или "platega"
         self._payment_gateways: dict[str, str] = {}
         self._selected_plans: dict[str, str] = {}
+        # Текущий тип reply-клавиатуры чата (по chat_id) — для контекстной
+        # обработки кнопки «Назад» вне админ-панели.
+        self._keyboard_kind: dict[str, str] = {}
 
     async def start(self) -> None:
         logger.info("⏳ Starting Telegram bot...")
@@ -209,6 +212,7 @@ class TelegramNotifier:
     ) -> bool:
         language = await self._get_language(chat_id)
         is_subscribed = await self.is_subscribed(chat_id)
+        self._keyboard_kind[chat_id] = keyboard_kind
         self._sender.enqueue(
             chat_id,
             text,
@@ -769,6 +773,14 @@ class TelegramNotifier:
         # ── Button press ────────────────────────────────────────
         action = BUTTON_ACTIONS.get(text)
 
+        # Кнопка «Назад» вне админ-панели (в т.ч. зависшая клавиатура отмены
+        # после успешного ввода промокода) возвращает в главное меню, а не
+        # в обработчик /admin_back.
+        if action == "/admin_back" and self._keyboard_kind.get(chat_id, "main") not in {"admin", "admin_promos", "admin_whitelist"}:
+            logger.info("   → User %s pressed back outside admin panel — returning to main menu", chat_id)
+            await self.send_message(chat_id, tr("back_to_main", language), keyboard_kind="main")
+            return
+
         # Gate для админских действий: проверяем права до выполнения.
         # Не-админу кнопка не видна, но он может ввести текст кнопки вручную.
         if action in ADMIN_BUTTON_ACTIONS and not self._is_admin(user_id):
@@ -1101,6 +1113,7 @@ class TelegramNotifier:
         if self._subs_storage is None:
             await self.send_message(chat_id, tr("internal_error", language))
             return
+        self._keyboard_kind[chat_id] = "main"
         sub = await self._subs_storage.get_any(chat_id)
         if sub is not None and sub.status == "pending":
             await self._show_pending_status(chat_id, sub)
