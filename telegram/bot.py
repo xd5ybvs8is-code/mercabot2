@@ -1612,13 +1612,6 @@ class TelegramNotifier:
                 )
                 return
             self._awaiting[chat_id] = {"phase": "promo_code"}
-            if msg_id:
-                await self._client.edit_message_text(
-                    chat_id,
-                    msg_id,
-                    tr("promo_code_prompt", language),
-                    reply_markup={"inline_keyboard": []},
-                )
             await self._client.answer_callback_query(cb_id)
             await self.send_message(
                 chat_id,
