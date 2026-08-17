@@ -33,16 +33,23 @@ async def _test_subscription_stats(tmp_path) -> None:
     await storage.activate_trial("u4", now + 43200)
     await storage.whitelist_add("u5", "admin")
 
+    promo = await storage.create_promo(3, "all", "admin")
+    assert (await storage.redeem_promo("u1", promo.code)).success is True
+    promo2 = await storage.create_promo(3, "all", "admin")
+    assert (await storage.redeem_promo("u6", promo2.code)).success is True
+
     stats = await storage.get_stats()
-    assert stats["by_status"] == {"active": 4}
-    assert stats["by_plan"] == {"7d": 2, "30d": 1, "trial": 1}
+    assert stats["by_status"] == {"active": 5}
+    assert stats["by_plan"] == {"7d": 2, "30d": 1, "trial": 1, "promo": 1}
+    assert stats["promo_users"] == 2
     assert stats["revenue"] == {"USDT": 500.0}
     assert stats["whitelist"] == 1
 
     await storage.mark_expired("u1")
     stats = await storage.get_stats()
     assert stats["by_status"]["expired"] == 1
-    assert stats["by_status"]["active"] == 3
+    assert stats["by_status"]["active"] == 4
+    assert stats["promo_users"] == 1
 
     await db.close()
 
@@ -154,6 +161,7 @@ def test_admin_stats_message_renders() -> None:
         subs_pending=1,
         subs_expired=2,
         plans="7d: 3, 30d: 1",
+        promo_users=2,
         whitelist=1,
         revenue="USDT: 400.00",
         db_size="0.1",
@@ -163,6 +171,7 @@ def test_admin_stats_message_renders() -> None:
     )
     assert "📈" in message
     assert "Циклов: 10" in message
+    assert "Промокоды: 2" in message
     assert "Выручка: USDT: 400.00" in message
 
     message_en = format_admin_stats(
@@ -187,6 +196,7 @@ def test_admin_stats_message_renders() -> None:
         subs_pending=1,
         subs_expired=2,
         plans="7d: 3, 30d: 1",
+        promo_users=2,
         whitelist=1,
         revenue="USDT: 400.00",
         db_size="0.1",

@@ -388,6 +388,7 @@ def make_handlers(
             subs_pending=by_status.get("pending", 0),
             subs_expired=by_status.get("expired", 0) + by_status.get("cancelled", 0),
             plans=plans_str,
+            promo_users=subs_stats.get("promo_users", 0),
             whitelist=subs_stats.get("whitelist", 0),
             revenue=revenue_str,
             db_size=db_size_mb,

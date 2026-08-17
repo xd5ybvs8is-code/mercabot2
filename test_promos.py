@@ -27,12 +27,61 @@ async def _test_promo_code_is_single_use_and_extends_access(tmp_path) -> None:
     subscription = await storage.get_any("user-1")
     assert subscription is not None
     assert subscription.plan == "promo"
+    assert subscription.promo_extended == 0
     assert subscription.status == "active"
     assert subscription.expires_at is not None
     assert subscription.expires_at >= int(time.time()) + 7 * 86400
 
     assert (await storage.redeem_promo("user-1", promo.code)).reason == "used"
     assert (await storage.redeem_promo("user-2", promo.code)).reason == "used"
+
+    await db.close()
+
+
+def test_promo_plan_states(tmp_path) -> None:
+    asyncio.run(_test_promo_plan_states(tmp_path))
+
+
+async def _test_promo_plan_states(tmp_path) -> None:
+    db = DatabaseConnection(tmp_path / "state.db")
+    await db.connect()
+    storage = SubscriptionStorage(db)
+    now = int(time.time())
+
+    await storage.create("paid-active", "7d", 1)
+    await storage.activate("paid-active", "7d", 1, "hash", "100", "USDT", now + 7 * 86400)
+    promo = await storage.create_promo(3, "all", "admin")
+    assert (await storage.redeem_promo("paid-active", promo.code)).success is True
+    sub = await storage.get_any("paid-active")
+    assert sub is not None
+    assert sub.plan == "7d"
+    assert sub.promo_extended == 1
+
+    await storage.create("paid-active", "7d", 2)
+    await storage.activate("paid-active", "7d", 2, "hash2", "100", "USDT", now + 14 * 86400)
+    sub = await storage.get_any("paid-active")
+    assert sub.plan == "7d"
+    assert sub.promo_extended == 1
+
+    await storage.create("paid-expired", "7d", 3)
+    await storage.activate("paid-expired", "7d", 3, "hash3", "100", "USDT", now - 1000)
+    promo2 = await storage.create_promo(3, "all", "admin")
+    assert (await storage.redeem_promo("paid-expired", promo2.code)).success is True
+    sub = await storage.get_any("paid-expired")
+    assert sub is not None
+    assert sub.plan == "promo"
+    assert sub.promo_extended == 0
+
+    await db.conn.execute(
+        "UPDATE subscriptions SET expires_at = ? WHERE user_id = 'paid-active'",
+        (now - 1000,),
+    )
+    await storage.create("paid-active", "30d", 4)
+    await storage.activate("paid-active", "30d", 4, "hash4", "300", "USDT", now + 30 * 86400)
+    sub = await storage.get_any("paid-active")
+    assert sub is not None
+    assert sub.plan == "30d"
+    assert sub.promo_extended == 0
 
     await db.close()
 

@@ -24,6 +24,7 @@ class SubscriptionRow:
     paid_asset: str | None
     payment_gateway: str | None
     expiry_reminder_sent: int | None
+    promo_extended: int
     created_at: int
     updated_at: int
 
@@ -125,6 +126,22 @@ class SubscriptionStorage:
     ) -> None:
         now = int(time.time())
         async with self._db.transaction() as conn:
+            prev_cursor = await conn.execute(
+                "SELECT plan, expires_at, promo_extended FROM subscriptions "
+                "WHERE user_id = ? AND invoice_id = ?",
+                (user_id, invoice_id),
+            )
+            prev = await prev_cursor.fetchone()
+            was_active = (
+                prev is not None
+                and prev["expires_at"] is not None
+                and prev["expires_at"] > now
+            )
+            keep_promo = (
+                was_active
+                and prev["promo_extended"] is not None
+                and int(prev["promo_extended"]) == 1
+            )
             cursor = await conn.execute(
                 "UPDATE subscriptions SET "
                 "  status = 'active',"
@@ -134,9 +151,10 @@ class SubscriptionStorage:
                 "  paid_amount = ?,"
                 "  paid_asset = ?,"
                 "  expiry_reminder_sent = NULL,"
+                "  promo_extended = ?,"
                 "  updated_at = ? "
                 "WHERE user_id = ? AND invoice_id = ?",
-                (now, expires_at, payment_hash, paid_amount, paid_asset, now, user_id, invoice_id),
+                (now, expires_at, payment_hash, paid_amount, paid_asset, int(keep_promo), now, user_id, invoice_id),
             )
             if cursor.rowcount > 0:
                 await conn.execute(
@@ -298,6 +316,7 @@ class SubscriptionStorage:
                 "  subscribed_at = excluded.subscribed_at,"
                 "  expires_at = excluded.expires_at,"
                 "  expiry_reminder_sent = NULL,"
+                "  promo_extended = 0,"
                 "  updated_at = excluded.updated_at",
                 (user_id, now, expires_at, now, now),
             )
@@ -525,17 +544,25 @@ class SubscriptionStorage:
             if subscription is None:
                 await conn.execute(
                     "INSERT INTO subscriptions "
-                    "(user_id, plan, status, subscribed_at, expires_at, created_at, updated_at) "
-                    "VALUES (?, 'promo', 'active', ?, ?, ?, ?)",
+                    "(user_id, plan, status, subscribed_at, expires_at, promo_extended, created_at, updated_at) "
+                    "VALUES (?, 'promo', 'active', ?, ?, 0, ?, ?)",
                     (user_id, now, expires_at, now, now),
                 )
             else:
                 await conn.execute(
                     "UPDATE subscriptions SET "
-                    "plan = CASE WHEN plan IN ('trial', 'promo') THEN 'promo' ELSE plan END, "
+                    "plan = CASE "
+                    "  WHEN plan IN ('trial', 'promo') THEN 'promo' "
+                    "  WHEN expires_at IS NULL THEN 'promo' "
+                    "  WHEN expires_at <= ? THEN 'promo' "
+                    "  ELSE plan END, "
+                    "promo_extended = CASE "
+                    "  WHEN plan NOT IN ('trial', 'promo') "
+                    "       AND expires_at IS NOT NULL AND expires_at > ? THEN 1 "
+                    "  ELSE 0 END, "
                     "status = 'active', expires_at = ?, "
                     "expiry_reminder_sent = NULL, updated_at = ? WHERE user_id = ?",
-                    (expires_at, now, user_id),
+                    (now, now, expires_at, now, user_id),
                 )
 
         logger.info(
@@ -566,6 +593,17 @@ class SubscriptionStorage:
         for row in await cursor.fetchall():
             by_plan[row["plan"]] = row["n"]
 
+        promo_users: int = 0
+        cursor = await self._db.conn.execute(
+            "SELECT COUNT(*) AS n FROM subscriptions "
+            "WHERE status = 'active' AND expires_at > ? "
+            "AND (plan = 'promo' OR promo_extended = 1)",
+            (int(time.time()),),
+        )
+        row = await cursor.fetchone()
+        if row:
+            promo_users = int(row["n"] or 0)
+
         revenue: dict[str, float] = {}
         cursor = await self._db.conn.execute(
             "SELECT paid_asset, SUM(CAST(paid_amount AS REAL)) AS total "
@@ -582,6 +620,7 @@ class SubscriptionStorage:
         return {
             "by_status": by_status,
             "by_plan": by_plan,
+            "promo_users": promo_users,
             "revenue": revenue,
             "whitelist": whitelist_row["n"] if whitelist_row else 0,
         }
@@ -602,6 +641,7 @@ class SubscriptionStorage:
             paid_asset=row["paid_asset"],
             payment_gateway=row["payment_gateway"],
             expiry_reminder_sent=row["expiry_reminder_sent"],
+            promo_extended=int(row["promo_extended"] or 0),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

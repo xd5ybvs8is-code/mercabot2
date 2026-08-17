@@ -162,6 +162,7 @@ TEXTS: dict[str, dict[Language, str]] = {
             "Активных URL: {urls_active} (всего: {urls_total})\n"
             "Подписки: активных {subs_active}, ожидают {subs_pending}, истекло {subs_expired}\n"
             "Планы: {plans}\n"
+            "Промокоды: {promo_users}\n"
             "Whitelist: {whitelist}\n"
             "Выручка: {revenue}\n\n"
             "🗄 <b>База данных</b>\n"
@@ -189,6 +190,7 @@ TEXTS: dict[str, dict[Language, str]] = {
             "Active URLs: {urls_active} (total: {urls_total})\n"
             "Subscriptions: active {subs_active}, pending {subs_pending}, expired {subs_expired}\n"
             "Plans: {plans}\n"
+            "Promo codes: {promo_users}\n"
             "Whitelist: {whitelist}\n"
             "Revenue: {revenue}\n\n"
             "🗄 <b>Database</b>\n"
@@ -346,8 +348,8 @@ TEXTS: dict[str, dict[Language, str]] = {
         "en": "❌ The promo code could not be applied. Please try again later.",
     },
     "promo_plan_label": {
-        "ru": "Промо-доступ",
-        "en": "Promo access",
+        "ru": "Promo",
+        "en": "Promo",
     },
     "subscription_expired": {
         "ru": "⚠️ Подписка закончилась\n\nВаши поиски временно приостановлены.\nПосле продления они продолжат работать автоматически.",

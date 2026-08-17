@@ -121,6 +121,12 @@ MIGRATE_EXPIRY_REMINDER_SENT_SQL = """
 ALTER TABLE subscriptions ADD COLUMN expiry_reminder_sent INTEGER;
 """
 
+# Промокод продлил активную платную подписку (например, 7 дней + промо):
+# тогда в «Моей подписке» план показывается как «7 дней + Promo».
+MIGRATE_PROMO_EXTENDED_SQL = """
+ALTER TABLE subscriptions ADD COLUMN promo_extended INTEGER NOT NULL DEFAULT 0;
+"""
+
 CREATE_TABLE_SUBSCRIPTIONS_SQL = """
 CREATE TABLE IF NOT EXISTS subscriptions (
     user_id       TEXT PRIMARY KEY,
@@ -133,6 +139,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     payment_hash  TEXT,
     paid_amount   TEXT,
     paid_asset    TEXT,
+    promo_extended INTEGER NOT NULL DEFAULT 0,
     created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at    INTEGER NOT NULL DEFAULT (unixepoch())
 );
@@ -283,6 +290,11 @@ class DatabaseConnection:
             await self._conn.execute(MIGRATE_EXPIRY_REMINDER_SENT_SQL)
         except Exception:
             logger.debug("  • expiry_reminder_sent column already exists — skipping")
+        logger.debug("  • Running migration: promo_extended column...")
+        try:
+            await self._conn.execute(MIGRATE_PROMO_EXTENDED_SQL)
+        except Exception:
+            logger.debug("  • promo_extended column already exists — skipping")
         await self._conn.commit()
         logger.info("=" * 50)
         logger.info("🗄️  DATABASE CONNECTED")
