@@ -487,6 +487,68 @@ class TelegramNotifier:
             await self._run_handler("/admin_whitelist_revoke", text, chat_id, user_id, keyboard_kind="admin_whitelist")
             return
 
+        if state and state.get("phase") == "promo_create":
+            if not self._is_admin(user_id):
+                logger.warning("⛔ Non-admin user %s in promo_create state — ignoring", chat_id)
+                del self._awaiting[chat_id]
+                await self.send_message(chat_id, tr("no_permission", language))
+                return
+            del self._awaiting[chat_id]
+            logger.info("   → Admin %s creating promo code", chat_id)
+            await self._run_handler("/admin_promo_create", text, chat_id, user_id, keyboard_kind="admin_promos")
+            return
+
+        if state and state.get("phase") == "promo_deactivate":
+            if not self._is_admin(user_id):
+                logger.warning("⛔ Non-admin user %s in promo_deactivate state — ignoring", chat_id)
+                del self._awaiting[chat_id]
+                await self.send_message(chat_id, tr("no_permission", language))
+                return
+            del self._awaiting[chat_id]
+            logger.info("   → Admin %s deactivating promo code", chat_id)
+            await self._run_handler("/admin_promo_deactivate", text, chat_id, user_id, keyboard_kind="admin_promos")
+            return
+
+        if state and state.get("phase") == "promo_code":
+            if self._subs_storage is None:
+                del self._awaiting[chat_id]
+                await self.send_message(chat_id, tr("internal_error", language))
+                return
+            result = await self._subs_storage.redeem_promo(chat_id, text)
+            if not result.success:
+                reason_key = {
+                    "not_found": "promo_not_found",
+                    "inactive": "promo_inactive",
+                    "used": "promo_used",
+                    "expired": "promo_expired",
+                    "target": "promo_target",
+                    "already_paid": "promo_already_paid",
+                    "new_promo_used": "promo_new_promo_used",
+                    "pending": "promo_pending",
+                }.get(result.reason, "promo_internal")
+                await self.send_message(
+                    chat_id,
+                    tr(reason_key, language),
+                    keyboard_kind="cancel",
+                    placeholder=tr("promo_code_placeholder", language),
+                )
+                return
+
+            del self._awaiting[chat_id]
+            if self._url_storage is not None:
+                reactivated = await self._url_storage.reactivate_chat(chat_id)
+                if reactivated > 0:
+                    logger.info(
+                        "🔄 Promo access redeemed for user %s — reactivated %s URL(s)",
+                        chat_id, reactivated,
+                    )
+            logger.info("   ✅ Promo code redeemed by user %s", chat_id)
+            await self._show_my_subscription(
+                chat_id,
+                notice=tr("promo_applied", language, days=result.duration_days),
+            )
+            return
+
         if state and state.get("phase") == "add_type":
             # Пользователь выбрал тип поиска на reply‑кнопках
             if text in {button_text("url_type", language), "🔗 URL"}:
@@ -772,6 +834,28 @@ class TelegramNotifier:
             )
             return
 
+        if action == "__await_promo_create__":
+            logger.info("   → Admin %s pressed 'Create promo code' button", chat_id)
+            self._awaiting[chat_id] = {"phase": "promo_create"}
+            await self.send_message(
+                chat_id,
+                tr("promo_create_prompt", language),
+                keyboard_kind="admin_promos",
+                placeholder=tr("promo_create_placeholder", language),
+            )
+            return
+
+        if action == "__await_promo_deactivate__":
+            logger.info("   → Admin %s pressed 'Deactivate promo code' button", chat_id)
+            self._awaiting[chat_id] = {"phase": "promo_deactivate"}
+            await self.send_message(
+                chat_id,
+                tr("promo_deactivate_prompt", language),
+                keyboard_kind="admin_promos",
+                placeholder=tr("promo_code_placeholder", language),
+            )
+            return
+
         if action == "__my_subscription__":
             logger.info("   → User %s pressed 'My Subscription' button", chat_id)
             await self._show_my_subscription(chat_id)
@@ -808,6 +892,8 @@ class TelegramNotifier:
                 keyboard_kind = "main"
             elif action.startswith("/admin_whitelist"):
                 keyboard_kind = "admin_whitelist"
+            elif action in {"/admin_promos", "/admin_promo_list"}:
+                keyboard_kind = "admin_promos"
             elif action.startswith("/admin_"):
                 keyboard_kind = "admin"
             else:
@@ -986,6 +1072,8 @@ class TelegramNotifier:
     def _plan_label(self, plan: str, language: str) -> str:
         if plan == "trial":
             return tr("trial_plan_label", language)
+        if plan == "promo":
+            return tr("promo_plan_label", language)
         days = 30
         if self._subs_storage is not None:
             days = self._subs_storage.get_plan_days(plan)
@@ -1004,7 +1092,7 @@ class TelegramNotifier:
             self._payment_gateways.pop(chat_id, None)
             await self._show_subscription(chat_id)
 
-    async def _show_my_subscription(self, chat_id: str) -> None:
+    async def _show_my_subscription(self, chat_id: str, notice: str | None = None) -> None:
         """Экран «Моя подписка»: статус с продлением, pending или покупка."""
         language = await self._get_language(chat_id)
         if self._subs_storage is None:
@@ -1021,14 +1109,17 @@ class TelegramNotifier:
                 f"{tr('subscription_status_title', language)}\n\n"
                 f"{tr('subscription_status_active', language, expires=expires_str, plan=self._plan_label(sub.plan, language))}"
             )
+            if notice:
+                status_text = f"{notice}\n\n{status_text}"
             if sub.paid_amount:
                 gateway_label = "SBP" if sub.payment_gateway == "platega" else "CryptoBot"
                 status_text += (
                     f"\n{tr('subscription_status_paid', language, amount=sub.paid_amount, asset=sub.paid_asset or '', gateway=gateway_label)}"
                 )
-            markup = {"inline_keyboard": [[
-                {"text": button_text("subscription_extend_btn", language), "callback_data": "renew_choose"},
-            ]]}
+            markup = {"inline_keyboard": [
+                [{"text": button_text("subscription_extend_btn", language), "callback_data": "renew_choose"}],
+                [{"text": button_text("promo_enter_btn", language), "callback_data": "promo_enter"}],
+            ]}
             payload = {
                 "chat_id": chat_id,
                 "text": status_text,
@@ -1046,9 +1137,12 @@ class TelegramNotifier:
             f"{tr('subscription_status_title', language)}\n\n"
             f"{tr('subscription_status_no', language)}"
         )
-        markup = {"inline_keyboard": [[
-            {"text": button_text("subscription_btn", language), "callback_data": "sub_buy"},
-        ]]}
+        if notice:
+            status_text = f"{notice}\n\n{status_text}"
+        markup = {"inline_keyboard": [
+            [{"text": button_text("subscription_btn", language), "callback_data": "sub_buy"}],
+            [{"text": button_text("promo_enter_btn", language), "callback_data": "promo_enter"}],
+        ]}
         payload = {
             "chat_id": chat_id,
             "text": status_text,
@@ -1511,6 +1605,29 @@ class TelegramNotifier:
     async def _dispatch_callback(self, cb_id: str, data: str, chat_id: str, msg_id: int | None) -> None:
         language = await self._get_language(chat_id)
 
+        if data == "promo_enter":
+            if self._subs_storage is None:
+                await self._client.answer_callback_query(
+                    cb_id, tr("internal_error", language), show_alert=True,
+                )
+                return
+            self._awaiting[chat_id] = {"phase": "promo_code"}
+            if msg_id:
+                await self._client.edit_message_text(
+                    chat_id,
+                    msg_id,
+                    tr("promo_code_prompt", language),
+                    reply_markup={"inline_keyboard": []},
+                )
+            await self._client.answer_callback_query(cb_id)
+            await self.send_message(
+                chat_id,
+                tr("promo_code_prompt", language),
+                keyboard_kind="cancel",
+                placeholder=tr("promo_code_placeholder", language),
+            )
+            return
+
         if data == "terms_open":
             await self._show_terms_inline(chat_id, msg_id)
             await self._client.answer_callback_query(cb_id)
@@ -1857,6 +1974,8 @@ class TelegramNotifier:
             keyboard_kind = "main"
         elif command.startswith("/admin_whitelist"):
             keyboard_kind = "admin_whitelist"
+        elif command == "/admin_promos" or command.startswith("/admin_promo"):
+            keyboard_kind = "admin_promos"
         elif command.startswith("/admin_"):
             keyboard_kind = "admin"
         else:
@@ -1864,6 +1983,24 @@ class TelegramNotifier:
         placeholder: str | None = None
         if command == "/admin_broadcast" and not argument:
             placeholder = tr("broadcast_placeholder", await self._get_language(chat_id))
+        if command == "/admin_promo_create" and not argument and self._is_admin(user_id):
+            self._awaiting[chat_id] = {"phase": "promo_create"}
+            await self.send_message(
+                chat_id,
+                tr("promo_create_prompt", await self._get_language(chat_id)),
+                keyboard_kind="admin_promos",
+                placeholder=tr("promo_create_placeholder", await self._get_language(chat_id)),
+            )
+            return
+        if command == "/admin_promo_deactivate" and not argument and self._is_admin(user_id):
+            self._awaiting[chat_id] = {"phase": "promo_deactivate"}
+            await self.send_message(
+                chat_id,
+                tr("promo_deactivate_prompt", await self._get_language(chat_id)),
+                keyboard_kind="admin_promos",
+                placeholder=tr("promo_code_placeholder", await self._get_language(chat_id)),
+            )
+            return
         await self._run_handler(command, argument, chat_id, user_id, keyboard_kind=keyboard_kind, placeholder=placeholder)
 
     async def _run_handler(

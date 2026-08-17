@@ -79,6 +79,7 @@ CREATE_TABLE_USERS_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     chat_id TEXT PRIMARY KEY,
     language TEXT NOT NULL DEFAULT 'ru' CHECK (language IN ('ru', 'en')),
+    ever_paid INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -152,6 +153,54 @@ CREATE TABLE IF NOT EXISTS whitelist (
 );
 """
 
+CREATE_TABLE_PROMO_CODES_SQL = """
+CREATE TABLE IF NOT EXISTS promo_codes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    code            TEXT NOT NULL UNIQUE,
+    duration_days   INTEGER NOT NULL CHECK (duration_days > 0),
+    audience        TEXT NOT NULL DEFAULT 'all'
+                    CHECK (audience IN ('all', 'new_only')),
+    target_user_id  TEXT,
+    active          INTEGER NOT NULL DEFAULT 1,
+    expires_at      INTEGER,
+    created_by      TEXT NOT NULL,
+    created_at      INTEGER NOT NULL
+);
+"""
+
+CREATE_TABLE_PROMO_REDEMPTIONS_SQL = """
+CREATE TABLE IF NOT EXISTS promo_redemptions (
+    promo_id    INTEGER PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    redeemed_at INTEGER NOT NULL,
+    FOREIGN KEY (promo_id) REFERENCES promo_codes(id) ON DELETE CASCADE
+);
+"""
+
+CREATE_INDEX_PROMO_REDEMPTIONS_USER_SQL = """
+CREATE INDEX IF NOT EXISTS idx_promo_redemptions_user_id
+ON promo_redemptions(user_id);
+"""
+
+MIGRATE_USER_EVER_PAID_SQL = """
+ALTER TABLE users ADD COLUMN ever_paid INTEGER NOT NULL DEFAULT 0;
+"""
+
+BACKFILL_USER_EVER_PAID_SQL = """
+UPDATE users SET ever_paid = 1
+WHERE chat_id IN (
+    SELECT user_id FROM subscriptions
+    WHERE paid_amount IS NOT NULL AND TRIM(paid_amount) != ''
+);
+"""
+
+INSERT_PAID_USERS_SQL = """
+INSERT OR IGNORE INTO users (chat_id, language, ever_paid, created_at, updated_at)
+SELECT user_id, 'ru', 1, CAST(strftime('%s', 'now') AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER)
+FROM subscriptions
+WHERE paid_amount IS NOT NULL AND TRIM(paid_amount) != '';
+"""
+
 
 class DatabaseConnection:
     """Manages async SQLite connection and schema creation."""
@@ -196,10 +245,21 @@ class DatabaseConnection:
         await self._conn.execute(CREATE_TABLE_TRIAL_USAGES_SQL)
         logger.debug("  • Creating table: whitelist...")
         await self._conn.execute(CREATE_TABLE_WHITELIST_SQL)
+        await self._conn.execute(CREATE_TABLE_PROMO_CODES_SQL)
+        await self._conn.execute(CREATE_TABLE_PROMO_REDEMPTIONS_SQL)
         logger.debug("  • Creating index: idx_seen_items_url_id...")
         await self._conn.execute(CREATE_INDEX_SEEN_ITEMS_SQL)
         logger.debug("  • Creating index: idx_notification_outbox_created_at...")
         await self._conn.execute(CREATE_INDEX_NOTIFICATION_OUTBOX_SQL)
+        await self._conn.execute(CREATE_INDEX_PROMO_REDEMPTIONS_USER_SQL)
+        logger.debug("  • Running migration: users.ever_paid column...")
+        try:
+            await self._conn.execute(MIGRATE_USER_EVER_PAID_SQL)
+        except Exception:
+            logger.debug("  • users.ever_paid column already exists — skipping")
+        logger.debug("  • Backfilling users.ever_paid from paid subscriptions...")
+        await self._conn.execute(INSERT_PAID_USERS_SQL)
+        await self._conn.execute(BACKFILL_USER_EVER_PAID_SQL)
         logger.debug("  • Running migration: deactivated_at column...")
         try:
             await self._conn.execute(MIGRATE_DEACTIVATED_AT_SQL)
@@ -228,7 +288,7 @@ class DatabaseConnection:
         logger.info("🗄️  DATABASE CONNECTED")
         logger.info("   Path: %s", self._db_path)
         logger.info("   Mode: WAL (Write-Ahead Logging)")
-        logger.info("   Tables: items, search_urls, seen_items, users, subscriptions, trial_usages, whitelist")
+        logger.info("   Tables: items, search_urls, seen_items, users, subscriptions, trial_usages, whitelist, promo_codes")
         logger.info("=" * 50)
 
     @asynccontextmanager

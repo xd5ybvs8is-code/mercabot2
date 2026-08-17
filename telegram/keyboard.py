@@ -53,6 +53,7 @@ def build_admin_keyboard_markup(
             [{"text": button_text("pause", language)}, {"text": button_text("resume", language)}],
             [{"text": button_text("broadcast", language)}],
             [{"text": button_text("whitelist", language)}],
+            [{"text": button_text("promo_codes", language)}],
             [{"text": button_text("back", language)}],
         ],
         "resize_keyboard": True,
@@ -90,6 +91,26 @@ def build_admin_whitelist_keyboard_markup(
             [{"text": button_text("whitelist_grant", language)}],
             [{"text": button_text("whitelist_revoke", language)}],
             [{"text": button_text("whitelist_list", language)}],
+            [{"text": button_text("back", language)}],
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False,
+    }
+    if placeholder:
+        result["input_field_placeholder"] = placeholder
+    return result
+
+
+def build_admin_promo_keyboard_markup(
+    language: str = "ru",
+    placeholder: str | None = None,
+) -> dict[str, Any]:
+    """Build admin promo-code sub-panel reply keyboard."""
+    result: dict[str, Any] = {
+        "keyboard": [
+            [{"text": button_text("promo_create", language)}],
+            [{"text": button_text("promo_list", language)}],
+            [{"text": button_text("promo_deactivate", language)}],
             [{"text": button_text("back", language)}],
         ],
         "resize_keyboard": True,
@@ -202,6 +223,7 @@ BUTTON_ACTIONS: dict[str, str] = {
     "⏸️ Пауза": "/admin_pause",
     "▶️ Продолжить": "/admin_resume",
     "📢 Рассылка всем": "__await_broadcast__",
+    "🎟 Промокоды": "/admin_promos",
     "🔙 Назад": "/admin_back",
     "📊 Bot status": "/admin_status",
     "📈 Statistics": "/admin_stats",
@@ -209,6 +231,7 @@ BUTTON_ACTIONS: dict[str, str] = {
     "⏸️ Pause": "/admin_pause",
     "▶️ Resume": "/admin_resume",
     "📢 Broadcast to all": "__await_broadcast__",
+    "🎟 Promo codes": "/admin_promos",
     "🔙 Back": "/admin_back",
     # ── управление whitelist ──
     "👥 Управление доступом": "/admin_whitelist",
@@ -219,6 +242,13 @@ BUTTON_ACTIONS: dict[str, str] = {
     "➖ Revoke Access": "__await_whitelist_revoke__",
     "📋 Список доступа": "/admin_whitelist_list",
     "📋 Access List": "/admin_whitelist_list",
+    # ── промокоды ──
+    "➕ Создать промокод": "__await_promo_create__",
+    "➕ Create promo code": "__await_promo_create__",
+    "📋 Список промокодов": "/admin_promo_list",
+    "📋 Promo code list": "/admin_promo_list",
+    "➖ Деактивировать промокод": "__await_promo_deactivate__",
+    "➖ Deactivate promo code": "__await_promo_deactivate__",
 }
 
 PAGE_SIZE = 9
@@ -335,6 +365,8 @@ def build_subscription_inline_keyboard(language: str = "ru") -> dict[str, Any]:
     return {"inline_keyboard": [[
         {"text": button_text("sub_7d", language), "callback_data": "sub_7d"},
         {"text": button_text("sub_30d", language), "callback_data": "sub_30d"},
+    ], [
+        {"text": button_text("promo_enter_btn", language), "callback_data": "promo_enter"},
     ]]}
 
 
@@ -342,6 +374,8 @@ def build_sbp_subscription_inline_keyboard(language: str = "ru") -> dict[str, An
     return {"inline_keyboard": [[
         {"text": button_text("sbp_plan_7d", language), "callback_data": "sbp_7d"},
         {"text": button_text("sbp_plan_30d", language), "callback_data": "sbp_30d"},
+    ], [
+        {"text": button_text("promo_enter_btn", language), "callback_data": "promo_enter"},
     ]]}
 
 
@@ -371,6 +405,8 @@ def build_plan_selection_keyboard(language: str = "ru") -> dict[str, Any]:
     return {"inline_keyboard": [[
         {"text": button_text("plan_7d", language), "callback_data": "plan_7d"},
         {"text": button_text("plan_30d", language), "callback_data": "plan_30d"},
+    ], [
+        {"text": button_text("promo_enter_btn", language), "callback_data": "promo_enter"},
     ]]}
 
 
@@ -396,5 +432,9 @@ ADMIN_BUTTON_ACTIONS: frozenset[str] = frozenset(
         "/admin_whitelist_list",
         "__await_whitelist_grant__",
         "__await_whitelist_revoke__",
+        "/admin_promos",
+        "/admin_promo_list",
+        "__await_promo_create__",
+        "__await_promo_deactivate__",
     }
 )

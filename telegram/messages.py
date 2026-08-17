@@ -3,6 +3,7 @@ from datetime import datetime
 
 from models.item import Item
 from storage.urls import SearchUrlRow
+from storage.subscriptions import PromoCodeRow
 from telegram.i18n import text
 
 def format_help(language: str) -> str:
@@ -96,5 +97,47 @@ def format_whitelist_list(entries: list[tuple[str, str, int]], language: str = "
         for user_id, granted_by, granted_at in entries:
             dt = datetime.fromtimestamp(granted_at).strftime("%d.%m.%Y %H:%M")
             result += text("whitelist_list_row", language, user_id=user_id, granted_by=granted_by, granted_at=dt)
+    return result
+
+
+def format_promo_list(entries: list[PromoCodeRow], language: str = "ru") -> str:
+    result = text("promo_list_title", language)
+    if not entries:
+        return result + text("promo_list_empty", language)
+
+    now = int(datetime.now().timestamp())
+    for promo in entries:
+        if promo.redeemed_by is not None:
+            status_key = "promo_status_used"
+        elif not promo.active:
+            status_key = "promo_status_inactive"
+        elif promo.expires_at is not None and promo.expires_at <= now:
+            status_key = "promo_status_expired"
+        else:
+            status_key = "promo_status_active"
+
+        audience_key = "promo_audience_new_only" if promo.audience == "new_only" else "promo_audience_all"
+        expires = (
+            datetime.fromtimestamp(promo.expires_at).strftime("%d.%m.%Y")
+            if promo.expires_at is not None else text("promo_never", language)
+        )
+        if promo.redeemed_by is None:
+            redeemed = text("promo_never", language)
+        else:
+            redeemed = escape(promo.redeemed_by)
+            if promo.redeemed_at is not None:
+                redeemed += f" ({datetime.fromtimestamp(promo.redeemed_at).strftime('%d.%m.%Y %H:%M')})"
+
+        result += text(
+            "promo_list_row",
+            language,
+            code=escape(promo.code),
+            days=promo.duration_days,
+            audience=text(audience_key, language),
+            status=text(status_key, language),
+            target=escape(promo.target_user_id) if promo.target_user_id else text("promo_never", language),
+            expires=expires,
+            redeemed=redeemed,
+        )
     return result
 

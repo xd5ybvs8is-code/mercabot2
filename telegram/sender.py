@@ -289,6 +289,7 @@ class MessageSender:
                 build_keyboard_markup,
                 build_admin_keyboard_markup,
                 build_admin_whitelist_keyboard_markup,
+                build_admin_promo_keyboard_markup,
                 build_cancel_keyboard_markup,
                 build_add_type_keyboard_markup,
                 build_keyword_filter_keyboard_markup,
@@ -316,6 +317,13 @@ class MessageSender:
                 is_admin = msg.chat_id in self._admin_user_ids
                 payload["reply_markup"] = (
                     build_admin_whitelist_keyboard_markup(language=msg.language, placeholder=msg.placeholder)
+                    if is_admin
+                    else build_keyboard_markup(False, language=msg.language, placeholder=msg.placeholder, is_subscribed=msg.is_subscribed)
+                )
+            elif msg.keyboard_kind == "admin_promos":
+                is_admin = msg.chat_id in self._admin_user_ids
+                payload["reply_markup"] = (
+                    build_admin_promo_keyboard_markup(language=msg.language, placeholder=msg.placeholder)
                     if is_admin
                     else build_keyboard_markup(False, language=msg.language, placeholder=msg.placeholder, is_subscribed=msg.is_subscribed)
                 )

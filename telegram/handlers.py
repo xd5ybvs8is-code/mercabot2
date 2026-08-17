@@ -18,6 +18,7 @@ from telegram.messages import (
     format_help,
     format_url_list,
     format_admin_status,
+    format_promo_list,
     format_whitelist_list,
 )
 from telegram.i18n import text
@@ -44,6 +45,40 @@ def _parse_add_input(text: str) -> tuple[str, str | None, str | None]:
         return url, parts[1].strip(), parts[2].strip()
     name = " | ".join(p.strip() for p in parts[1:]).strip()
     return url, name, None
+
+
+def _parse_promo_create_input(
+    raw: str,
+) -> tuple[int, str, str | None, int | None] | None:
+    """Parse: days | audience | target_user_id | YYYY-MM-DD expiration."""
+    parts = [part.strip() for part in raw.split("|")]
+    if len(parts) < 2 or len(parts) > 4:
+        return None
+
+    days_part, audience = parts[0], parts[1].lower()
+    if not days_part.isdigit() or int(days_part) <= 0:
+        return None
+    if audience not in {"all", "new_only"}:
+        return None
+
+    target: str | None = None
+    if len(parts) >= 3 and parts[2] not in {"", "-", "—"}:
+        if not parts[2].isdigit() or int(parts[2]) <= 0:
+            return None
+        target = parts[2]
+
+    expires_at: int | None = None
+    if len(parts) == 4 and parts[3] not in {"", "-", "—"}:
+        try:
+            expires_at = int(
+                datetime.strptime(parts[3], "%Y-%m-%d")
+                .replace(hour=23, minute=59, second=59)
+                .timestamp()
+            )
+        except ValueError:
+            return None
+
+    return int(days_part), audience, target, expires_at
 
 
 def _metric(metric_stats: dict, name: str) -> float:
@@ -474,6 +509,80 @@ def make_handlers(
         logger.info("📋 Admin %s requested whitelist (%s entries)", chat_id, len(entries))
         return format_whitelist_list(entries, language)
 
+    async def cmd_admin_promos(_arg: str, chat_id: str, user_id: str, language: str) -> str:
+        if not _is_admin(user_id):
+            logger.warning("⛔ Non-admin user %s tried /admin_promos", chat_id)
+            return text("no_permission", language)
+        logger.info("🎟 Admin promo panel opened by user %s", chat_id)
+        return text("promo_panel", language)
+
+    async def cmd_admin_promo_create(argument: str, chat_id: str, user_id: str, language: str) -> str:
+        if not _is_admin(user_id):
+            logger.warning("⛔ Non-admin user %s tried /admin_promo_create", chat_id)
+            return text("no_permission", language)
+        if not argument.strip():
+            return text("promo_create_prompt", language)
+        if subs_storage is None:
+            return text("internal_error", language)
+
+        parsed = _parse_promo_create_input(argument)
+        if parsed is None:
+            return text("promo_create_invalid", language)
+        days, audience, target, expires_at = parsed
+        try:
+            promo = await subs_storage.create_promo(
+                duration_days=days,
+                audience=audience,
+                created_by=user_id,
+                target_user_id=target,
+                expires_at=expires_at,
+            )
+        except ValueError:
+            logger.warning("⚠️ Invalid promo creation request from admin %s", user_id)
+            return text("promo_create_invalid", language)
+
+        audience_label = text(
+            "promo_audience_new_only" if audience == "new_only" else "promo_audience_all",
+            language,
+        )
+        target_label = target or text("promo_never", language)
+        expires_label = (
+            datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y")
+            if expires_at is not None else text("promo_never", language)
+        )
+        return text(
+            "promo_created",
+            language,
+            code=escape(promo.code),
+            days=days,
+            audience=audience_label,
+            target=escape(target_label),
+            expires=expires_label,
+        )
+
+    async def cmd_admin_promo_list(_arg: str, chat_id: str, user_id: str, language: str) -> str:
+        if not _is_admin(user_id):
+            logger.warning("⛔ Non-admin user %s tried /admin_promo_list", chat_id)
+            return text("no_permission", language)
+        if subs_storage is None:
+            return text("internal_error", language)
+        entries = await subs_storage.list_promos()
+        logger.info("📋 Admin %s requested promo list (%s entries)", chat_id, len(entries))
+        return format_promo_list(entries, language)
+
+    async def cmd_admin_promo_deactivate(code: str, chat_id: str, user_id: str, language: str) -> str:
+        if not _is_admin(user_id):
+            logger.warning("⛔ Non-admin user %s tried /admin_promo_deactivate", chat_id)
+            return text("no_permission", language)
+        if not code.strip():
+            return text("promo_deactivate_prompt", language)
+        if subs_storage is None:
+            return text("internal_error", language)
+        normalized = subs_storage.normalize_promo_code(code)
+        if await subs_storage.deactivate_promo(normalized):
+            return text("promo_deactivated", language, code=escape(normalized))
+        return text("promo_deactivate_not_found", language, code=escape(normalized))
+
     return {
         # ── пользовательские ──
         "/help": cmd_help,
@@ -495,4 +604,8 @@ def make_handlers(
         "/admin_whitelist_grant": cmd_admin_whitelist_grant,
         "/admin_whitelist_revoke": cmd_admin_whitelist_revoke,
         "/admin_whitelist_list": cmd_admin_whitelist_list,
+        "/admin_promos": cmd_admin_promos,
+        "/admin_promo_create": cmd_admin_promo_create,
+        "/admin_promo_list": cmd_admin_promo_list,
+        "/admin_promo_deactivate": cmd_admin_promo_deactivate,
     }

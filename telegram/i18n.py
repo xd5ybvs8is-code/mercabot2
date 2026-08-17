@@ -18,6 +18,10 @@ TEXTS: dict[str, dict[Language, str]] = {
     "pause": {"ru": "⏸️ Пауза", "en": "⏸️ Pause"},
     "resume": {"ru": "▶️ Продолжить", "en": "▶️ Resume"},
     "broadcast": {"ru": "📢 Рассылка всем", "en": "📢 Broadcast to all"},
+    "promo_codes": {"ru": "🎟 Промокоды", "en": "🎟 Promo codes"},
+    "promo_create": {"ru": "➕ Создать промокод", "en": "➕ Create promo code"},
+    "promo_list": {"ru": "📋 Список промокодов", "en": "📋 Promo code list"},
+    "promo_deactivate": {"ru": "➖ Деактивировать промокод", "en": "➖ Deactivate promo code"},
     "back": {"ru": "🔙 Назад", "en": "🔙 Back"},
     "url_type": {"ru": "🔗 URL", "en": "🔗 URL"},
     "keyword_type": {"ru": "🔤 Ключевое слово", "en": "🔤 Keyword"},
@@ -126,8 +130,8 @@ TEXTS: dict[str, dict[Language, str]] = {
         "en": "New listing\n\nTitle:\n{title}\n\nPrice:\n{price:,} JPY\n\nLink:\n{url}",
     },
     "admin_panel": {
-        "ru": "🛠 <b>Админ-панель</b>\n\nДоступные действия:\n📊 <b>Статус бота</b> — сводка состояния\n📈 <b>Статистика</b> — подробная статистика по боту\n🔄 <b>Перезагрузить URL</b> — немедленный цикл проверки\n⏸️ <b>Пауза</b> / ▶️ <b>Продолжить</b> — остановка/возобновление watcher'а\n📢 <b>Рассылка всем</b> — отправить сообщение всем пользователям\n🔙 <b>Назад</b> — выйти из админ-панели",
-        "en": "🛠 <b>Admin panel</b>\n\nAvailable actions:\n📊 <b>Bot status</b> — state summary\n📈 <b>Statistics</b> — detailed bot statistics\n🔄 <b>Reload URLs</b> — run an immediate check cycle\n⏸️ <b>Pause</b> / ▶️ <b>Resume</b> — pause/resume the watcher\n📢 <b>Broadcast to all</b> — send a message to all users\n🔙 <b>Back</b> — leave the admin panel",
+        "ru": "🛠 <b>Админ-панель</b>\n\nДоступные действия:\n📊 <b>Статус бота</b> — сводка состояния\n📈 <b>Статистика</b> — подробная статистика по боту\n🔄 <b>Перезагрузить URL</b> — немедленный цикл проверки\n⏸️ <b>Пауза</b> / ▶️ <b>Продолжить</b> — остановка/возобновление watcher'а\n📢 <b>Рассылка всем</b> — отправить сообщение всем пользователям\n🎟 <b>Промокоды</b> — создать и управлять промокодами\n🔙 <b>Назад</b> — выйти из админ-панели",
+        "en": "🛠 <b>Admin panel</b>\n\nAvailable actions:\n📊 <b>Bot status</b> — state summary\n📈 <b>Statistics</b> — detailed bot statistics\n🔄 <b>Reload URLs</b> — run an immediate check cycle\n⏸️ <b>Pause</b> / ▶️ <b>Resume</b> — pause/resume the watcher\n📢 <b>Broadcast to all</b> — send a message to all users\n🎟 <b>Promo codes</b> — create and manage promo codes\n🔙 <b>Back</b> — leave the admin panel",
     },
     "broadcast_prompt": {
         "ru": "📢 <b>Рассылка всем</b>\n\nОтправьте текст сообщения, которое получат все пользователи бота.\nПоддерживается HTML-разметка Telegram.\n\nДля отмены отправьте /admin_back.",
@@ -289,6 +293,62 @@ TEXTS: dict[str, dict[Language, str]] = {
         "ru": "💎 Продлить подписку",
         "en": "💎 Extend Subscription",
     },
+    "promo_enter_btn": {
+        "ru": "🎟 Ввести промокод",
+        "en": "🎟 Enter promo code",
+    },
+    "promo_code_prompt": {
+        "ru": "🎟 <b>Введите промокод</b> одним сообщением.\n\nДля отмены нажмите «🔙 Назад».",
+        "en": "🎟 <b>Enter your promo code</b> in one message.\n\nTo cancel, press «🔙 Back».",
+    },
+    "promo_code_placeholder": {
+        "ru": "Введите промокод...",
+        "en": "Enter promo code...",
+    },
+    "promo_applied": {
+        "ru": "✅ Промокод применён: добавлено {days} дн.",
+        "en": "✅ Promo code applied: {days} day(s) added.",
+    },
+    "promo_not_found": {
+        "ru": "❌ Промокод не найден. Проверьте написание и попробуйте ещё раз.",
+        "en": "❌ Promo code not found. Check the spelling and try again.",
+    },
+    "promo_inactive": {
+        "ru": "❌ Этот промокод деактивирован.",
+        "en": "❌ This promo code has been deactivated.",
+    },
+    "promo_used": {
+        "ru": "❌ Этот промокод уже использован.",
+        "en": "❌ This promo code has already been used.",
+    },
+    "promo_expired": {
+        "ru": "❌ Срок действия этого промокода истёк.",
+        "en": "❌ This promo code has expired.",
+    },
+    "promo_target": {
+        "ru": "❌ Этот промокод предназначен для другого пользователя.",
+        "en": "❌ This promo code is intended for another user.",
+    },
+    "promo_already_paid": {
+        "ru": "❌ Этот промокод доступен только пользователям, которые ещё не оплачивали подписку.",
+        "en": "❌ This promo code is available only to users who have never paid for a subscription.",
+    },
+    "promo_new_promo_used": {
+        "ru": "❌ Вы уже использовали промокод для новых пользователей.",
+        "en": "❌ You have already used a new-user promo code.",
+    },
+    "promo_pending": {
+        "ru": "❌ Сначала завершите или отмените текущую оплату.",
+        "en": "❌ Finish or cancel your current payment first.",
+    },
+    "promo_internal": {
+        "ru": "❌ Не удалось применить промокод. Попробуйте позже.",
+        "en": "❌ The promo code could not be applied. Please try again later.",
+    },
+    "promo_plan_label": {
+        "ru": "Промо-доступ",
+        "en": "Promo access",
+    },
     "subscription_expired": {
         "ru": "⚠️ Подписка закончилась\n\nВаши поиски временно приостановлены.\nПосле продления они продолжат работать автоматически.",
         "en": "⚠️ Subscription has ended\n\nYour searches are temporarily paused.\nAfter renewal they will continue working automatically.",
@@ -417,6 +477,95 @@ TEXTS: dict[str, dict[Language, str]] = {
         "ru": "Введите Telegram user_id...",
         "en": "Enter Telegram user_id...",
     },
+    "promo_panel": {
+        "ru": "🎟 <b>Промокоды</b>\n\nВыберите действие:",
+        "en": "🎟 <b>Promo codes</b>\n\nChoose an action:",
+    },
+    "promo_create_prompt": {
+        "ru": (
+            "➕ <b>Создание промокода</b>\n\n"
+            "Отправьте параметры в формате:\n"
+            "<code>дни | тип | user_id или - | дата окончания или -</code>\n\n"
+            "Тип: <code>all</code> или <code>new_only</code>.\n"
+            "Дата: <code>YYYY-MM-DD</code>.\n\n"
+            "Примеры:\n"
+            "<code>7 | new_only | - | -</code>\n"
+            "<code>30 | all | 123456789 | 2026-12-31</code>"
+        ),
+        "en": (
+            "➕ <b>Create promo code</b>\n\n"
+            "Send parameters in this format:\n"
+            "<code>days | type | user_id or - | expiration date or -</code>\n\n"
+            "Type: <code>all</code> or <code>new_only</code>.\n"
+            "Date: <code>YYYY-MM-DD</code>.\n\n"
+            "Examples:\n"
+            "<code>7 | new_only | - | -</code>\n"
+            "<code>30 | all | 123456789 | 2026-12-31</code>"
+        ),
+    },
+    "promo_create_invalid": {
+        "ru": "❌ Неверный формат. Пример: <code>7 | new_only | - | -</code>",
+        "en": "❌ Invalid format. Example: <code>7 | new_only | - | -</code>",
+    },
+    "promo_create_placeholder": {
+        "ru": "Например: 7 | new_only | - | -",
+        "en": "Example: 7 | new_only | - | -",
+    },
+    "promo_created": {
+        "ru": (
+            "✅ <b>Промокод создан</b>\n\n"
+            "Код: <code>{code}</code>\n"
+            "Доступ: {days} дн.\n"
+            "Аудитория: {audience}\n"
+            "Пользователь: {target}\n"
+            "Действует до: {expires}"
+        ),
+        "en": (
+            "✅ <b>Promo code created</b>\n\n"
+            "Code: <code>{code}</code>\n"
+            "Access: {days} day(s)\n"
+            "Audience: {audience}\n"
+            "User: {target}\n"
+            "Valid until: {expires}"
+        ),
+    },
+    "promo_deactivate_prompt": {
+        "ru": "➖ Отправьте промокод, который нужно деактивировать.",
+        "en": "➖ Send the promo code to deactivate.",
+    },
+    "promo_deactivated": {
+        "ru": "✅ Промокод <code>{code}</code> деактивирован.",
+        "en": "✅ Promo code <code>{code}</code> deactivated.",
+    },
+    "promo_deactivate_not_found": {
+        "ru": "❌ Активный промокод <code>{code}</code> не найден.",
+        "en": "❌ Active promo code <code>{code}</code> not found.",
+    },
+    "promo_list_title": {
+        "ru": "📋 <b>Промокоды</b>\n\n",
+        "en": "📋 <b>Promo codes</b>\n\n",
+    },
+    "promo_list_row": {
+        "ru": (
+            "• <code>{code}</code> — {days} дн., {audience}, {status}\n"
+            "  Пользователь: {target}; до: {expires}; использован: {redeemed}\n"
+        ),
+        "en": (
+            "• <code>{code}</code> — {days} day(s), {audience}, {status}\n"
+            "  User: {target}; until: {expires}; redeemed: {redeemed}\n"
+        ),
+    },
+    "promo_list_empty": {
+        "ru": "Промокодов пока нет.",
+        "en": "There are no promo codes yet.",
+    },
+    "promo_audience_all": {"ru": "для всех", "en": "all users"},
+    "promo_audience_new_only": {"ru": "для новых", "en": "new users only"},
+    "promo_status_active": {"ru": "активен", "en": "active"},
+    "promo_status_used": {"ru": "использован", "en": "used"},
+    "promo_status_inactive": {"ru": "деактивирован", "en": "deactivated"},
+    "promo_status_expired": {"ru": "истёк", "en": "expired"},
+    "promo_never": {"ru": "—", "en": "—"},
     "sbp_invoice_created": {
         "ru": "✅ Ссылка на оплату через СБП создана.\n\n📦 {plan}\n\n⏳ На оплату даётся 30 минут.\n\nПерейдите по кнопке ниже для оплаты через QR-код.",
         "en": "✅ SBP payment link created.\n\n📦 {plan}\n\n⏳ You have 30 minutes to pay.\n\nFollow the button below to pay via QR code.",

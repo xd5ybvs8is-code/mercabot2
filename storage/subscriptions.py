@@ -1,5 +1,8 @@
-import time
 import logging
+import secrets
+import sqlite3
+import string
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +26,29 @@ class SubscriptionRow:
     expiry_reminder_sent: int | None
     created_at: int
     updated_at: int
+
+
+@dataclass(slots=True, frozen=True)
+class PromoCodeRow:
+    id: int
+    code: str
+    duration_days: int
+    audience: str
+    target_user_id: str | None
+    active: bool
+    expires_at: int | None
+    created_by: str
+    created_at: int
+    redeemed_by: str | None
+    redeemed_at: int | None
+
+
+@dataclass(slots=True, frozen=True)
+class PromoRedemptionResult:
+    success: bool
+    reason: str
+    duration_days: int = 0
+    expires_at: int | None = None
 
 
 class SubscriptionStorage:
@@ -99,7 +125,7 @@ class SubscriptionStorage:
     ) -> None:
         now = int(time.time())
         async with self._db.transaction() as conn:
-            await conn.execute(
+            cursor = await conn.execute(
                 "UPDATE subscriptions SET "
                 "  status = 'active',"
                 "  subscribed_at = ?,"
@@ -112,6 +138,15 @@ class SubscriptionStorage:
                 "WHERE user_id = ? AND invoice_id = ?",
                 (now, expires_at, payment_hash, paid_amount, paid_asset, now, user_id, invoice_id),
             )
+            if cursor.rowcount > 0:
+                await conn.execute(
+                    "INSERT INTO users (chat_id, language, ever_paid, created_at, updated_at) "
+                    "VALUES (?, 'ru', 1, ?, ?) "
+                    "ON CONFLICT(chat_id) DO UPDATE SET "
+                    "  ever_paid = 1,"
+                    "  updated_at = excluded.updated_at",
+                    (user_id, now, now),
+                )
         logger.info("✅ Subscription activated for user %s (plan=%s, expires=%s)", user_id, plan, expires_at)
 
     async def mark_expired(self, user_id: str) -> None:
@@ -308,6 +343,211 @@ class SubscriptionStorage:
         )
         row = await cursor.fetchone()
         return row is not None
+
+    # ── Promo codes ──────────────────────────────────────────────
+
+    @staticmethod
+    def normalize_promo_code(raw_code: str) -> str:
+        return raw_code.strip().upper()
+
+    @staticmethod
+    def _generate_promo_code() -> str:
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        return "MERCARI-" + "".join(secrets.choice(alphabet) for _ in range(8))
+
+    async def create_promo(
+        self,
+        duration_days: int,
+        audience: str,
+        created_by: str,
+        *,
+        target_user_id: str | None = None,
+        expires_at: int | None = None,
+    ) -> PromoCodeRow:
+        """Create a single-use promo code and return the generated code."""
+        if duration_days <= 0:
+            raise ValueError("Promo duration must be positive")
+        if audience not in {"all", "new_only"}:
+            raise ValueError("Unsupported promo audience")
+
+        now = int(time.time())
+        if expires_at is not None and expires_at <= now:
+            raise ValueError("Promo expiration must be in the future")
+        target = target_user_id.strip() if target_user_id and target_user_id.strip() else None
+
+        async with self._db.transaction() as conn:
+            for _ in range(10):
+                candidate = self.normalize_promo_code(self._generate_promo_code())
+                try:
+                    cursor = await conn.execute(
+                        "INSERT INTO promo_codes "
+                        "(code, duration_days, audience, target_user_id, active, expires_at, created_by, created_at) "
+                        "VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
+                        (candidate, duration_days, audience, target, expires_at, created_by, now),
+                    )
+                except sqlite3.IntegrityError:
+                    continue
+                promo_id = int(cursor.lastrowid)
+                break
+            else:
+                raise RuntimeError("Failed to generate a unique promo code")
+
+        logger.info(
+            "🎟 Promo code created: code=%s, days=%s, audience=%s, target=%s, by=%s",
+            candidate, duration_days, audience, target or "-", created_by,
+        )
+        return PromoCodeRow(
+            id=promo_id,
+            code=candidate,
+            duration_days=duration_days,
+            audience=audience,
+            target_user_id=target,
+            active=True,
+            expires_at=expires_at,
+            created_by=created_by,
+            created_at=now,
+            redeemed_by=None,
+            redeemed_at=None,
+        )
+
+    async def list_promos(self) -> list[PromoCodeRow]:
+        cursor = await self._db.conn.execute(
+            "SELECT p.id, p.code, p.duration_days, p.audience, p.target_user_id, "
+            "p.active, p.expires_at, p.created_by, p.created_at, "
+            "r.user_id AS redeemed_by, r.redeemed_at "
+            "FROM promo_codes p "
+            "LEFT JOIN promo_redemptions r ON r.promo_id = p.id "
+            "ORDER BY p.created_at DESC, p.id DESC",
+        )
+        rows = await cursor.fetchall()
+        return [
+            PromoCodeRow(
+                id=row["id"],
+                code=row["code"],
+                duration_days=row["duration_days"],
+                audience=row["audience"],
+                target_user_id=row["target_user_id"],
+                active=bool(row["active"]),
+                expires_at=row["expires_at"],
+                created_by=row["created_by"],
+                created_at=row["created_at"],
+                redeemed_by=row["redeemed_by"],
+                redeemed_at=row["redeemed_at"],
+            )
+            for row in rows
+        ]
+
+    async def deactivate_promo(self, raw_code: str) -> bool:
+        code = self.normalize_promo_code(raw_code)
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "UPDATE promo_codes SET active = 0 WHERE code = ? AND active = 1",
+                (code,),
+            )
+            changed = cursor.rowcount > 0
+        if changed:
+            logger.info("🎟 Promo code deactivated: %s", code)
+        return changed
+
+    async def redeem_promo(self, user_id: str, raw_code: str) -> PromoRedemptionResult:
+        """Atomically validate, consume and apply a single-use promo code."""
+        code = self.normalize_promo_code(raw_code)
+        if not code:
+            return PromoRedemptionResult(False, "not_found")
+
+        now = int(time.time())
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute(
+                "SELECT p.*, r.user_id AS redeemed_by "
+                "FROM promo_codes p "
+                "LEFT JOIN promo_redemptions r ON r.promo_id = p.id "
+                "WHERE p.code = ?",
+                (code,),
+            )
+            promo = await cursor.fetchone()
+            if promo is None:
+                return PromoRedemptionResult(False, "not_found")
+            if not promo["active"]:
+                return PromoRedemptionResult(False, "inactive")
+            if promo["redeemed_by"] is not None:
+                return PromoRedemptionResult(False, "used")
+            if promo["expires_at"] is not None and promo["expires_at"] <= now:
+                return PromoRedemptionResult(False, "expired")
+            if promo["target_user_id"] is not None and promo["target_user_id"] != user_id:
+                return PromoRedemptionResult(False, "target")
+
+            user_cursor = await conn.execute(
+                "SELECT ever_paid FROM users WHERE chat_id = ?",
+                (user_id,),
+            )
+            user = await user_cursor.fetchone()
+            ever_paid = bool(user["ever_paid"]) if user is not None else False
+
+            if promo["audience"] == "new_only":
+                if ever_paid:
+                    return PromoRedemptionResult(False, "already_paid")
+                previous_cursor = await conn.execute(
+                    "SELECT 1 FROM promo_redemptions r "
+                    "JOIN promo_codes p ON p.id = r.promo_id "
+                    "WHERE r.user_id = ? AND p.audience = 'new_only' LIMIT 1",
+                    (user_id,),
+                )
+                if await previous_cursor.fetchone() is not None:
+                    return PromoRedemptionResult(False, "new_promo_used")
+
+            sub_cursor = await conn.execute(
+                "SELECT plan, status, expires_at FROM subscriptions WHERE user_id = ?",
+                (user_id,),
+            )
+            subscription = await sub_cursor.fetchone()
+            if subscription is not None and subscription["status"] == "pending":
+                return PromoRedemptionResult(False, "pending")
+
+            base = now
+            if subscription is not None and subscription["expires_at"] and subscription["expires_at"] > now:
+                base = subscription["expires_at"]
+            expires_at = base + int(promo["duration_days"]) * 86400
+
+            inserted = await conn.execute(
+                "INSERT OR IGNORE INTO promo_redemptions (promo_id, user_id, redeemed_at) "
+                "VALUES (?, ?, ?)",
+                (promo["id"], user_id, now),
+            )
+            if inserted.rowcount == 0:
+                return PromoRedemptionResult(False, "used")
+
+            await conn.execute(
+                "INSERT OR IGNORE INTO users (chat_id, language, ever_paid, created_at, updated_at) "
+                "VALUES (?, 'ru', 0, ?, ?)",
+                (user_id, now, now),
+            )
+
+            if subscription is None:
+                await conn.execute(
+                    "INSERT INTO subscriptions "
+                    "(user_id, plan, status, subscribed_at, expires_at, created_at, updated_at) "
+                    "VALUES (?, 'promo', 'active', ?, ?, ?, ?)",
+                    (user_id, now, expires_at, now, now),
+                )
+            else:
+                await conn.execute(
+                    "UPDATE subscriptions SET "
+                    "plan = CASE WHEN plan IN ('trial', 'promo') THEN 'promo' ELSE plan END, "
+                    "status = 'active', expires_at = ?, "
+                    "expiry_reminder_sent = NULL, updated_at = ? WHERE user_id = ?",
+                    (expires_at, now, user_id),
+                )
+
+        logger.info(
+            "🎟 Promo code redeemed: code=%s, user=%s, days=%s, expires=%s",
+            code, user_id, promo["duration_days"], expires_at,
+        )
+        return PromoRedemptionResult(
+            True,
+            "success",
+            duration_days=int(promo["duration_days"]),
+            expires_at=expires_at,
+        )
 
     async def get_stats(self) -> dict:
         """Агрегаты для админ-панели: статусы, планы, выручка, whitelist."""
