@@ -171,6 +171,7 @@ class TelegramNotifier:
     async def start(self) -> None:
         logger.info("⏳ Starting Telegram bot...")
         await self._client.start()
+        await self._setup_bot_menu()
         if self._user_storage is not None:
             stored_offset = await self._user_storage.get_state("telegram_update_offset")
             if stored_offset is not None:
@@ -192,6 +193,25 @@ class TelegramNotifier:
         await self._sender.stop()
         await self._client.close()
         logger.info("✅ Telegram bot closed")
+
+    async def _setup_bot_menu(self) -> None:
+        """Регистрирует команды бота и включает кнопку меню у поля ввода."""
+        commands = [{"command": "start", "description": "Главное меню"}]
+        try:
+            await self._client.call_api("setMyCommands", {"commands": commands})
+            await self._client.call_api(
+                "setMyCommands",
+                {
+                    "commands": [{"command": "start", "description": "Main menu"}],
+                    "language_code": "en",
+                },
+            )
+            await self._client.call_api(
+                "setChatMenuButton", {"menu_button": {"type": "commands"}}
+            )
+            logger.info("🍔 Bot menu button enabled: /start — Главное меню")
+        except Exception:
+            logger.exception("Failed to configure bot menu button")
 
     async def _on_chat_lost(self, chat_id: str) -> None:
         """Clean up a chat that Telegram reports as permanently gone."""
