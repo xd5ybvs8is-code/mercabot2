@@ -228,13 +228,51 @@ async def _test_promo_redemption_is_serialized(tmp_path) -> None:
     await db.close()
 
 
+def test_promo_custom_code(tmp_path) -> None:
+    asyncio.run(_test_promo_custom_code(tmp_path))
+
+
+async def _test_promo_custom_code(tmp_path) -> None:
+    db = DatabaseConnection(tmp_path / "state.db")
+    await db.connect()
+    storage = SubscriptionStorage(db)
+
+    promo = await storage.create_promo(7, "all", "admin", custom_code="summer2026")
+    assert promo.code == "SUMMER2026"
+
+    try:
+        await storage.create_promo(7, "all", "admin", custom_code="SUMMER2026")
+        assert False, "Duplicate custom code must raise ValueError"
+    except ValueError:
+        pass
+
+    for bad in ("bad code", "bad!", "", "A" * 33):
+        try:
+            await storage.create_promo(7, "all", "admin", custom_code=bad)
+            assert False, f"Invalid custom code must raise ValueError: {bad!r}"
+        except ValueError:
+            pass
+
+    auto = await storage.create_promo(7, "all", "admin")
+    assert auto.code.startswith("MERCARI-")
+    assert (await storage.redeem_promo("user-1", "SUMMER2026")).success is True
+
+    await db.close()
+
+
 def test_promo_create_input_parser() -> None:
-    assert _parse_promo_create_input("7 | new_only | - | -") == (7, "new_only", None, None)
+    assert _parse_promo_create_input("7 | new_only | - | -") == (7, "new_only", None, None, None)
     parsed = _parse_promo_create_input("30 | all | 12345 | 2099-12-31")
     assert parsed is not None
     assert parsed[:3] == (30, "all", "12345")
+    assert parsed[4] is None
     assert _parse_promo_create_input("7 | something") is None
     assert _parse_promo_create_input("7 | new_only | bad") is None
+    assert _parse_promo_create_input("7 | all | - | - | -") == (7, "all", None, None, None)
+    assert _parse_promo_create_input("7 | all | - | - | SUMMER2026") == (7, "all", None, None, "SUMMER2026")
+    assert _parse_promo_create_input("7 | all | - | - | summer2026") == (7, "all", None, None, "SUMMER2026")
+    assert _parse_promo_create_input("7 | all | - | - | bad code") is None
+    assert _parse_promo_create_input("7 | all | - | - | " + "A" * 33) is None
 
 
 def test_subscription_screens_include_promo_button() -> None:

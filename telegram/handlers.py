@@ -49,10 +49,10 @@ def _parse_add_input(text: str) -> tuple[str, str | None, str | None]:
 
 def _parse_promo_create_input(
     raw: str,
-) -> tuple[int, str, str | None, int | None] | None:
-    """Parse: days | audience | target_user_id | YYYY-MM-DD expiration."""
+) -> tuple[int, str, str | None, int | None, str | None] | None:
+    """Parse: days | audience | target_user_id | YYYY-MM-DD expiration | custom code or -."""
     parts = [part.strip() for part in raw.split("|")]
-    if len(parts) < 2 or len(parts) > 4:
+    if len(parts) < 2 or len(parts) > 5:
         return None
 
     days_part, audience = parts[0], parts[1].lower()
@@ -68,7 +68,7 @@ def _parse_promo_create_input(
         target = parts[2]
 
     expires_at: int | None = None
-    if len(parts) == 4 and parts[3] not in {"", "-", "—"}:
+    if len(parts) >= 4 and parts[3] not in {"", "-", "—"}:
         try:
             expires_at = int(
                 datetime.strptime(parts[3], "%Y-%m-%d")
@@ -78,7 +78,14 @@ def _parse_promo_create_input(
         except ValueError:
             return None
 
-    return int(days_part), audience, target, expires_at
+    custom_code: str | None = None
+    if len(parts) == 5 and parts[4] not in {"", "-", "—"}:
+        try:
+            custom_code = SubscriptionStorage.validate_custom_promo_code(parts[4])
+        except ValueError:
+            return None
+
+    return int(days_part), audience, target, expires_at, custom_code
 
 
 def _metric(metric_stats: dict, name: str) -> float:
@@ -529,7 +536,7 @@ def make_handlers(
         parsed = _parse_promo_create_input(argument)
         if parsed is None:
             return text("promo_create_invalid", language)
-        days, audience, target, expires_at = parsed
+        days, audience, target, expires_at, custom_code = parsed
         try:
             promo = await subs_storage.create_promo(
                 duration_days=days,
@@ -537,9 +544,12 @@ def make_handlers(
                 created_by=user_id,
                 target_user_id=target,
                 expires_at=expires_at,
+                custom_code=custom_code,
             )
-        except ValueError:
+        except ValueError as exc:
             logger.warning("⚠️ Invalid promo creation request from admin %s", user_id)
+            if custom_code is not None and "already exists" in str(exc):
+                return text("promo_create_taken", language, code=escape(custom_code))
             return text("promo_create_invalid", language)
 
         audience_label = text(

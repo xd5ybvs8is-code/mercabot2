@@ -1,4 +1,5 @@
 import logging
+import re
 import secrets
 import sqlite3
 import string
@@ -378,6 +379,14 @@ class SubscriptionStorage:
         return raw_code.strip().upper()
 
     @staticmethod
+    def validate_custom_promo_code(raw_code: str) -> str:
+        """Normalize and validate a custom promo code; raise ValueError if invalid."""
+        code = SubscriptionStorage.normalize_promo_code(raw_code)
+        if not re.fullmatch(r"[A-Z0-9-]{1,32}", code):
+            raise ValueError("Invalid custom promo code")
+        return code
+
+    @staticmethod
     def _generate_promo_code() -> str:
         alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
         return "MERCARI-" + "".join(secrets.choice(alphabet) for _ in range(8))
@@ -390,6 +399,7 @@ class SubscriptionStorage:
         *,
         target_user_id: str | None = None,
         expires_at: int | None = None,
+        custom_code: str | None = None,
     ) -> PromoCodeRow:
         """Create a single-use promo code and return the generated code."""
         if duration_days <= 0:
@@ -403,8 +413,8 @@ class SubscriptionStorage:
         target = target_user_id.strip() if target_user_id and target_user_id.strip() else None
 
         async with self._db.transaction() as conn:
-            for _ in range(10):
-                candidate = self.normalize_promo_code(self._generate_promo_code())
+            if custom_code is not None:
+                candidate = self.validate_custom_promo_code(custom_code)
                 try:
                     cursor = await conn.execute(
                         "INSERT INTO promo_codes "
@@ -412,12 +422,25 @@ class SubscriptionStorage:
                         "VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
                         (candidate, duration_days, audience, target, expires_at, created_by, now),
                     )
-                except sqlite3.IntegrityError:
-                    continue
+                except sqlite3.IntegrityError as exc:
+                    raise ValueError("Promo code already exists") from exc
                 promo_id = int(cursor.lastrowid)
-                break
             else:
-                raise RuntimeError("Failed to generate a unique promo code")
+                for _ in range(10):
+                    candidate = self.normalize_promo_code(self._generate_promo_code())
+                    try:
+                        cursor = await conn.execute(
+                            "INSERT INTO promo_codes "
+                            "(code, duration_days, audience, target_user_id, active, expires_at, created_by, created_at) "
+                            "VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
+                            (candidate, duration_days, audience, target, expires_at, created_by, now),
+                        )
+                    except sqlite3.IntegrityError:
+                        continue
+                    promo_id = int(cursor.lastrowid)
+                    break
+                else:
+                    raise RuntimeError("Failed to generate a unique promo code")
 
         logger.info(
             "🎟 Promo code created: code=%s, days=%s, audience=%s, target=%s, by=%s",
