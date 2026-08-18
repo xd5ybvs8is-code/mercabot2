@@ -59,7 +59,7 @@ def _is_permanent_error(body: str) -> bool:
             for pattern in _PERMANENT_DESCRIPTIONS:
                 if pattern in desc_lower:
                     return True
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError, AttributeError):
         pass
     return False
 
@@ -72,7 +72,7 @@ def _parse_error_body(body: str) -> tuple[str, int | None]:
             data.get("description", body),
             data.get("error_code"),
         )
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError, AttributeError):
         return (body, None)
 
 
@@ -147,7 +147,7 @@ class TelegramClient:
                 raise
             except TelegramPermanentError:
                 raise
-            except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+            except (asyncio.TimeoutError, aiohttp.ClientError, json.JSONDecodeError, TypeError, ValueError) as exc:
                 logger.error(
                     "❌ Telegram request failed (attempt %s/%s): %s",
                     attempt, MAX_RETRIES, exc,
@@ -165,7 +165,7 @@ class TelegramClient:
             value = data.get("parameters", {}).get("retry_after")
             if value is not None:
                 return float(value)
-        except (json.JSONDecodeError, TypeError, ValueError):
+        except (json.JSONDecodeError, TypeError, AttributeError, ValueError):
             pass
         return 1.0
 
@@ -209,12 +209,14 @@ class TelegramClient:
                         "❌ Telegram API error (attempt %s/%s): %s %s",
                         attempt, MAX_RETRIES, response.status, body,
                     )
+                    if attempt < MAX_RETRIES:
+                        continue
                     return None
             except TelegramRateLimitError:
                 raise
             except TelegramPermanentError:
                 raise
-            except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+            except (asyncio.TimeoutError, aiohttp.ClientError, json.JSONDecodeError, TypeError, ValueError) as exc:
                 logger.error(
                     "❌ Telegram request failed (attempt %s/%s): %s",
                     attempt, MAX_RETRIES, exc,
@@ -266,7 +268,7 @@ class TelegramClient:
                         "⚠️ Telegram API error %s (attempt %s/%s): %s",
                         method, attempt, MAX_RETRIES, response.status,
                     )
-            except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+            except (asyncio.TimeoutError, aiohttp.ClientError, json.JSONDecodeError, TypeError, ValueError) as exc:
                 log_level = logger.warning if attempt < MAX_RETRIES else logger.error
                 log_level(
                     "⚠️ Telegram request failed %s (attempt %s/%s): %s",

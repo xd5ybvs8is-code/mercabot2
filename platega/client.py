@@ -133,7 +133,7 @@ class PlategaClient:
                     if resp.status == 200:
                         amount, currency_val = self._parse_details(data.get("paymentDetails", {}))
                         return PlategaTransaction(
-                            transaction_id=data.get("id", ""),
+                            transaction_id=data.get("transactionId") or data.get("id", ""),
                             status=data.get("status", ""),
                             amount=amount,
                             currency=currency_val,

@@ -268,7 +268,7 @@ class MercariWatcher:
                 items = await self._client.search(condition, dpop=signer)
             except Exception as exc:
                 logger.error("   ❌ [%s] Fetch failed for URL #%s: %s", mode, url_row.id, exc)
-                return
+                raise
 
             current_ids = {item.id for item in items}
             logger.info("   ✅ [%s] URL #%s returned %s items", mode, url_row.id, len(items))
@@ -279,6 +279,7 @@ class MercariWatcher:
                 async with self._url_storage.transaction() as conn:
                     await self._url_storage.mark_seen_bulk(url_row.id, list(current_ids))
                     await self._url_storage.insert_items_bulk(url_row.id, items)
+                    await self._url_storage.mark_url_bootstrapped(url_row.id)
                 logger.info(
                     "   ✅ [BOOTSTRAP] URL #%s: %s items marked as seen and stored",
                     url_row.id, len(items),
@@ -296,7 +297,7 @@ class MercariWatcher:
                 items = await self._client.search(condition, dpop=signer)
             except Exception as exc:
                 logger.error("   ❌ Fetch failed for URL #%s: %s", url_row.id, exc)
-                return
+                raise
 
             current_ids = {item.id for item in items}
             logger.info("   ✅ URL #%s returned %s items — checking for new ones", url_row.id, len(items))

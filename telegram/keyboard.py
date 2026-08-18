@@ -299,7 +299,7 @@ def build_list_items_inline_keyboard_paginated(
     keyboard = []
     for row in urls:
         keyboard.append([{
-            "text": row.name,
+            "text": row.name[:64],
             "callback_data": f"info_{row.id}",
         }])
     nav_row = []
@@ -336,7 +336,7 @@ def build_rename_inline_keyboard(urls: list, language: str = "ru") -> dict[str, 
         if getattr(row, "source", "url") == "keyword":
             continue
         keyboard.append([{
-            "text": row.name,
+            "text": row.name[:64],
             "callback_data": f"rnm_{row.id}",
         }])
     keyboard.append([{

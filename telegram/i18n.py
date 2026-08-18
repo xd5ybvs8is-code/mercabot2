@@ -216,6 +216,18 @@ TEXTS: dict[str, dict[Language, str]] = {
         "en": "URL must be from jp.mercari.com",
     },
     "url_parse_error": {"ru": "Не удалось разобрать URL: {error}", "en": "Could not parse URL: {error}"},
+    "url_input_too_long": {
+        "ru": "❌ Слишком длинное имя, ключевое слово или URL.",
+        "en": "❌ The name, keyword, or URL is too long.",
+    },
+    "url_limit_reached": {
+        "ru": "❌ Достигнут лимит: не более 100 URL на пользователя.",
+        "en": "❌ Limit reached: no more than 100 URLs per user.",
+    },
+    "broadcast_too_long": {
+        "ru": "❌ Сообщение слишком длинное. Максимум 4096 символов.",
+        "en": "❌ The message is too long. Maximum 4096 characters.",
+    },
     "url_deleted": {"ru": "URL удалён", "en": "URL deleted"},
     "invalid_id": {
         "ru": "Укажите ID URL для удаления. Пример:\n/remove 2",
@@ -379,6 +391,10 @@ TEXTS: dict[str, dict[Language, str]] = {
     "trial_already_used": {
         "ru": "❌ Вы уже использовали пробный доступ.\n\nПриобретите подписку для продолжения.",
         "en": "❌ You have already used your trial access.\n\nPurchase a subscription to continue.",
+    },
+    "trial_pending": {
+        "ru": "⏳ Сначала завершите или отмените текущую оплату.",
+        "en": "⏳ Finish or cancel your current payment first.",
     },
     "trial_plan_label": {
         "ru": "Пробный (12 часов)",

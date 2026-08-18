@@ -1,5 +1,6 @@
 import asyncio
 from html import escape
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -35,6 +36,7 @@ from telegram.i18n import text as tr
 from telegram.messages import format_item_notification, format_url_detail, format_url_list
 from telegram.sender import MessageSender, Priority
 from models.item import Item
+from payments import payment_matches
 from storage.urls import PendingNotification
 from storage.users import UserStorage
 
@@ -169,6 +171,13 @@ class TelegramNotifier:
     async def start(self) -> None:
         logger.info("⏳ Starting Telegram bot...")
         await self._client.start()
+        if self._user_storage is not None:
+            stored_offset = await self._user_storage.get_state("telegram_update_offset")
+            if stored_offset is not None:
+                try:
+                    self._offset = int(stored_offset)
+                except ValueError:
+                    logger.warning("Ignoring invalid persisted Telegram offset: %r", stored_offset)
         if self._url_storage is not None:
             pending = await self._url_storage.get_pending_notifications()
             for notification in pending:
@@ -289,9 +298,16 @@ class TelegramNotifier:
         async def acknowledge() -> None:
             if self._url_storage is None:
                 return
-            await self._url_storage.complete_notification(
-                notification.id, notification.search_url_id, notification.item_id,
-            )
+            for attempt in range(1, 4):
+                try:
+                    await self._url_storage.complete_notification(
+                        notification.id, notification.search_url_id, notification.item_id,
+                    )
+                    return
+                except Exception:
+                    if attempt == 3:
+                        raise
+                    await asyncio.sleep(attempt)
 
         self._sender.enqueue(
             notification.chat_id,
@@ -301,6 +317,7 @@ class TelegramNotifier:
             priority=Priority.NORMAL,
             language="ru",
             on_success=acknowledge,
+            on_drop=acknowledge,
         )
 
     async def _get_language(self, chat_id: str) -> str:
@@ -357,7 +374,7 @@ class TelegramNotifier:
     async def _fetch_and_handle_updates(self) -> None:
         params: dict[str, Any] = {
             "timeout": 10,
-            "allowed_updates": ["message", "callback_query"],
+            "allowed_updates": json.dumps(["message", "callback_query"]),
         }
         if self._offset is not None:
             params["offset"] = self._offset
@@ -371,21 +388,27 @@ class TelegramNotifier:
             logger.debug("📩 Received %s update(s) from Telegram", len(updates))
 
         for update in updates:
-            self._offset = update.get("update_id", 0) + 1
-
-            callback_query = update.get("callback_query")
-            if callback_query is not None:
-                await self._handle_callback_query(callback_query)
+            update_id = update.get("update_id")
+            if not isinstance(update_id, int):
+                logger.warning("Ignoring Telegram update without valid update_id: %r", update)
                 continue
-
-            message = update.get("message")
-            if message is None:
-                continue
-            chat_id = message.get("chat", {}).get("id")
-            if not chat_id:
-                continue
-            logger.info("💬 Message from user %s: '%s'", chat_id, (message.get("text") or "")[:80])
-            await self._handle_message(str(chat_id), message)
+            try:
+                callback_query = update.get("callback_query")
+                if callback_query is not None:
+                    await self._handle_callback_query(callback_query)
+                else:
+                    message = update.get("message")
+                    if message is not None:
+                        chat_id = message.get("chat", {}).get("id")
+                        if chat_id:
+                            logger.info("💬 Message from user %s: '%s'", chat_id, (message.get("text") or "")[:80])
+                            await self._handle_message(str(chat_id), message)
+            except Exception:
+                logger.exception("Failed to process Telegram update %s; it will be retried", update_id)
+                break
+            self._offset = update_id + 1
+            if self._user_storage is not None:
+                await self._user_storage.set_state("telegram_update_offset", str(self._offset))
 
     async def _handle_message(self, chat_id: str, message: dict[str, Any]) -> None:
         text = (message.get("text") or "").strip()
@@ -1180,10 +1203,20 @@ class TelegramNotifier:
             return
         if sub.payment_gateway == "platega" and self._platega_client is not None and sub.payment_hash is not None:
             txn = await self._platega_client.get_payment_status(sub.payment_hash)
-            if txn is not None and txn.status == "CONFIRMED":
+            if (
+                txn is not None
+                and txn.status == "CONFIRMED"
+                and txn.transaction_id == sub.payment_hash
+            ):
+                if not payment_matches(
+                    sub.plan, chat_id, txn.amount, txn.currency, txn.payload,
+                    currency=txn.currency, expected_asset="RUB",
+                ):
+                    await self.send_message(chat_id, tr("invoice_error", language))
+                    return
                 plan_days = self._subs_storage.get_plan_days(sub.plan)
                 expires_at = await self._subs_storage.get_renewal_expiry(chat_id, plan_days)
-                await self._subs_storage.activate(
+                activated = await self._subs_storage.activate(
                     user_id=chat_id,
                     plan=sub.plan,
                     invoice_id=sub.invoice_id or 0,
@@ -1192,6 +1225,8 @@ class TelegramNotifier:
                     paid_asset=txn.currency,
                     expires_at=expires_at,
                 )
+                if not activated:
+                    return
                 if self._url_storage is not None:
                     reactivated = await self._url_storage.reactivate_chat(chat_id)
                     if reactivated > 0:
@@ -1209,7 +1244,10 @@ class TelegramNotifier:
                 return
             now = int(time.time())
             if sub.created_at and (now - sub.created_at) > 30 * 60:
-                await self._subs_storage.cancel_pending(chat_id)
+                if not await self._platega_client.cancel_transaction(sub.payment_hash):
+                    await self.send_message(chat_id, tr("invoice_error", language))
+                    return
+                await self._subs_storage.cancel_pending(chat_id, sub.invoice_id, "platega")
                 await self._show_subscription(chat_id)
             else:
                 markup = build_sbp_invoice_keyboard(
@@ -1234,9 +1272,15 @@ class TelegramNotifier:
             if invoices:
                 inv = invoices[0]
                 if inv.status == "paid":
+                    if not payment_matches(
+                        sub.plan, chat_id, inv.amount, inv.asset, inv.payload,
+                        currency="RUB", expected_asset="USDT",
+                    ):
+                        await self.send_message(chat_id, tr("invoice_error", language))
+                        return
                     plan_days = self._subs_storage.get_plan_days(sub.plan)
                     expires_at = await self._subs_storage.get_renewal_expiry(chat_id, plan_days)
-                    await self._subs_storage.activate(
+                    activated = await self._subs_storage.activate(
                         user_id=chat_id,
                         plan=sub.plan,
                         invoice_id=sub.invoice_id,
@@ -1245,6 +1289,8 @@ class TelegramNotifier:
                         paid_asset=inv.asset,
                         expires_at=expires_at,
                     )
+                    if not activated:
+                        return
                     if self._url_storage is not None:
                         reactivated = await self._url_storage.reactivate_chat(chat_id)
                         if reactivated > 0:
@@ -1262,7 +1308,10 @@ class TelegramNotifier:
                     return
                 now = int(time.time())
                 if sub.created_at and (now - sub.created_at) > 30 * 60:
-                    await self._subs_storage.cancel_pending(chat_id)
+                    if not await self._crypto_client.delete_invoice(sub.invoice_id):
+                        await self.send_message(chat_id, tr("invoice_error", language))
+                        return
+                    await self._subs_storage.cancel_pending(chat_id, sub.invoice_id, "cryptobot")
                     await self._show_subscription(chat_id)
                 else:
                     markup = build_invoice_keyboard(inv.pay_url, sub.invoice_id, language)
@@ -1280,7 +1329,10 @@ class TelegramNotifier:
                 return
             now = int(time.time())
             if sub.created_at and (now - sub.created_at) > 30 * 60:
-                await self._subs_storage.cancel_pending(chat_id)
+                if not await self._crypto_client.delete_invoice(sub.invoice_id):
+                    await self.send_message(chat_id, tr("invoice_error", language))
+                    return
+                await self._subs_storage.cancel_pending(chat_id, sub.invoice_id, "cryptobot")
                 await self._show_subscription(chat_id)
             else:
                 status_text = (
@@ -1316,8 +1368,19 @@ class TelegramNotifier:
             )
             return
 
+        current = await self._subs_storage.get_any(chat_id)
+        if current is not None and current.status == "pending":
+            await self._client.answer_callback_query(
+                cb_id, tr("trial_pending", language), show_alert=True,
+            )
+            return
+
         expires_at = int(time.time()) + 12 * 3600
-        await self._subs_storage.activate_trial(chat_id, expires_at)
+        if not await self._subs_storage.activate_trial(chat_id, expires_at):
+            await self._client.answer_callback_query(
+                cb_id, tr("trial_already_used", language), show_alert=True,
+            )
+            return
         if self._url_storage is not None:
             reactivated = await self._url_storage.reactivate_chat(chat_id)
             if reactivated > 0:
@@ -1328,7 +1391,6 @@ class TelegramNotifier:
             await self._client.edit_message_text(
                 chat_id, trial_msg_id,
                 tr("welcome", language),
-                parse_mode="HTML",
             )
 
         await self._client.answer_callback_query(
@@ -1359,6 +1421,15 @@ class TelegramNotifier:
         import json as _json
         payload = _json.dumps({"plan": plan_days, "user_id": chat_id})
 
+        existing = await self._subs_storage.get_any(chat_id)
+        if existing is not None and existing.status == "pending":
+            if existing.invoice_id and not await self._crypto_client.delete_invoice(existing.invoice_id):
+                await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
+                return
+            await self._subs_storage.cancel_pending(
+                chat_id, existing.invoice_id, "cryptobot",
+            )
+
         invoice = await self._crypto_client.create_invoice(
             amount=plan_price,
             asset="USDT",
@@ -1376,12 +1447,10 @@ class TelegramNotifier:
             )
             return
 
-        existing = await self._subs_storage.get_any(chat_id)
-        if existing is not None and existing.status == "pending" and existing.invoice_id:
-            await self._crypto_client.delete_invoice(existing.invoice_id)
-            logger.info("🗑️ Cancelled old CryptoBot invoice #%s for user %s", existing.invoice_id, chat_id)
-
-        await self._subs_storage.create(chat_id, f"{plan_days}d", invoice.invoice_id)
+        await self._subs_storage.create(
+            chat_id, f"{plan_days}d", invoice.invoice_id,
+            payment_hash=invoice.hash,
+        )
         await self._client.answer_callback_query(cb_id)
 
         language = await self._get_language(chat_id)
@@ -1416,9 +1485,15 @@ class TelegramNotifier:
         invoices = await self._crypto_client.get_invoices([invoice_id])
         paid = next((i for i in invoices if i.status == "paid"), None)
         if paid is not None:
+            if not payment_matches(
+                sub.plan, chat_id, paid.amount, paid.asset, paid.payload,
+                currency="RUB", expected_asset="USDT",
+            ):
+                await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
+                return
             plan_days = self._subs_storage.get_plan_days(sub.plan)
             expires_at = await self._subs_storage.get_renewal_expiry(chat_id, plan_days)
-            await self._subs_storage.activate(
+            activated = await self._subs_storage.activate(
                 user_id=chat_id,
                 plan=sub.plan,
                 invoice_id=invoice_id,
@@ -1427,6 +1502,9 @@ class TelegramNotifier:
                 paid_asset=paid.asset,
                 expires_at=expires_at,
             )
+            if not activated:
+                await self._client.answer_callback_query(cb_id, tr("invoice_cancelled", language), show_alert=True)
+                return
             if self._url_storage is not None:
                 reactivated = await self._url_storage.reactivate_chat(chat_id)
                 if reactivated > 0:
@@ -1444,7 +1522,10 @@ class TelegramNotifier:
 
         now = int(time.time())
         if sub.created_at and (now - sub.created_at) > 30 * 60:
-            await self._subs_storage.cancel_pending(chat_id)
+            if not await self._crypto_client.delete_invoice(invoice_id):
+                await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
+                return
+            await self._subs_storage.cancel_pending(chat_id, invoice_id, "cryptobot")
             await self._client.answer_callback_query(cb_id, tr("invoice_cancelled", language), show_alert=True)
             if msg_id:
                 await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled", language))
@@ -1466,8 +1547,10 @@ class TelegramNotifier:
                 await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled", language))
             return
 
-        await self._crypto_client.delete_invoice(invoice_id)
-        await self._subs_storage.cancel_pending(chat_id)
+        if not await self._crypto_client.delete_invoice(invoice_id):
+            await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
+            return
+        await self._subs_storage.cancel_pending(chat_id, invoice_id, "cryptobot")
         await self._client.answer_callback_query(cb_id)
         if msg_id:
             await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled_by_user", language))
@@ -1486,6 +1569,15 @@ class TelegramNotifier:
         import json as _json
         payload = _json.dumps({"plan": plan_days, "user_id": chat_id})
 
+        existing = await self._subs_storage.get_any(chat_id)
+        if existing is not None and existing.status == "pending":
+            if existing.payment_hash and not await self._platega_client.cancel_transaction(existing.payment_hash):
+                await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
+                return
+            await self._subs_storage.cancel_pending(
+                chat_id, existing.invoice_id, "platega",
+            )
+
         txn = await self._platega_client.create_payment(
             amount=plan_price,
             currency="RUB",
@@ -1497,16 +1589,11 @@ class TelegramNotifier:
             await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
             return
 
-        existing = await self._subs_storage.get_any(chat_id)
-        if existing is not None and existing.status == "pending" and existing.payment_hash:
-            await self._platega_client.cancel_transaction(existing.payment_hash)
-            logger.info("🗑️ Cancelled old Platega transaction %s for user %s", existing.payment_hash, chat_id)
-
         await self._subs_storage.create(
             chat_id, f"{plan_days}d", 0,
             payment_gateway="platega",
+            payment_hash=txn.transaction_id,
         )
-        await self._subs_storage.set_payment_hash(chat_id, txn.transaction_id)
         await self._client.answer_callback_query(cb_id)
 
         language = await self._get_language(chat_id)
@@ -1539,10 +1626,16 @@ class TelegramNotifier:
             return
 
         txn = await self._platega_client.get_payment_status(txn_id)
-        if txn is not None and txn.status == "CONFIRMED":
+        if txn is not None and txn.status == "CONFIRMED" and txn.transaction_id == txn_id:
+            if not payment_matches(
+                sub.plan, chat_id, txn.amount, txn.currency, txn.payload,
+                currency=txn.currency, expected_asset="RUB",
+            ):
+                await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
+                return
             plan_days = self._subs_storage.get_plan_days(sub.plan)
             expires_at = await self._subs_storage.get_renewal_expiry(chat_id, plan_days)
-            await self._subs_storage.activate(
+            activated = await self._subs_storage.activate(
                 user_id=chat_id,
                 plan=sub.plan,
                 invoice_id=sub.invoice_id or 0,
@@ -1551,6 +1644,9 @@ class TelegramNotifier:
                 paid_asset=txn.currency,
                 expires_at=expires_at,
             )
+            if not activated:
+                await self._client.answer_callback_query(cb_id, tr("invoice_cancelled", language), show_alert=True)
+                return
             if self._url_storage is not None:
                 reactivated = await self._url_storage.reactivate_chat(chat_id)
                 if reactivated > 0:
@@ -1568,7 +1664,10 @@ class TelegramNotifier:
 
         now = int(time.time())
         if sub.created_at and (now - sub.created_at) > 30 * 60:
-            await self._subs_storage.cancel_pending(chat_id)
+            if not await self._platega_client.cancel_transaction(txn_id):
+                await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
+                return
+            await self._subs_storage.cancel_pending(chat_id, sub.invoice_id, "platega")
             await self._client.answer_callback_query(cb_id, tr("invoice_cancelled", language), show_alert=True)
             if msg_id:
                 await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled", language))
@@ -1590,8 +1689,10 @@ class TelegramNotifier:
                 await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled", language))
             return
 
-        await self._platega_client.cancel_transaction(txn_id)
-        await self._subs_storage.cancel_pending(chat_id)
+        if not await self._platega_client.cancel_transaction(txn_id):
+            await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
+            return
+        await self._subs_storage.cancel_pending(chat_id, sub.invoice_id, "platega")
         await self._client.answer_callback_query(cb_id)
         if msg_id:
             await self._client.edit_message_text(chat_id, msg_id, tr("invoice_cancelled_by_user", language))
@@ -2056,6 +2157,6 @@ class TelegramNotifier:
         except Exception as exc:
             logger.exception("   ❌ Command handler error for '%s'", command)
             await self.send_message(
-                chat_id, tr("error", language, error=escape(str(exc))),
+                chat_id, tr("internal_error", language),
                 keyboard_kind=keyboard_kind,
             )

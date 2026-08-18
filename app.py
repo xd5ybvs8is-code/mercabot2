@@ -19,9 +19,33 @@ from storage.urls import UrlStorage
 from storage.users import UserStorage
 from telegram.bot import TelegramNotifier
 from telegram.handlers import make_handlers
+from telegram.i18n import text as tr
 from telegram.messages import format_shutdown, format_startup
+from payments import payment_matches
 
 BASE_DIR = Path(__file__).resolve().parent
+
+async def _close_started_resources(
+    db: DatabaseConnection | None = None,
+    client: MercariClient | None = None,
+    crypto_client: CryptoPayClient | None = None,
+    platega_client: PlategaClient | None = None,
+    telegram: TelegramNotifier | None = None,
+    metrics_server: MetricsServer | None = None,
+) -> None:
+    """Close resources when startup fails before the main shutdown block."""
+    if metrics_server is not None:
+        await metrics_server.stop()
+    if telegram is not None:
+        await telegram.close()
+    if platega_client is not None:
+        await platega_client.close()
+    if crypto_client is not None:
+        await crypto_client.close()
+    if client is not None:
+        await client.aclose()
+    if db is not None:
+        await db.close()
 
 
 def setup_logging() -> None:
@@ -84,13 +108,15 @@ async def _poll_invoices_loop(
             for sub in expired_pending:
                 if sub.payment_gateway == "platega":
                     continue
-                await subs_storage.cancel_pending(sub.user_id)
+                if sub.invoice_id is None or not await crypto_client.delete_invoice(sub.invoice_id):
+                    logger.warning("Could not cancel expired CryptoBot invoice %s", sub.invoice_id)
+                    continue
+                if not await subs_storage.cancel_pending(sub.user_id, sub.invoice_id, "cryptobot"):
+                    continue
                 language = await telegram.get_language(sub.user_id)
                 await telegram.send_message(
                     sub.user_id,
-                    "⏰ Счёт на оплату отменён.\n\nВремя на оплату истекло (30 минут). Создайте новый счёт."
-                    if language == "ru"
-                    else "⏰ Invoice cancelled.\n\nPayment time expired (30 minutes). Create a new invoice.",
+                    tr("invoice_cancelled", language),
                 )
 
             pending = await subs_storage.get_pending_invoices()
@@ -106,9 +132,20 @@ async def _poll_invoices_loop(
                             continue
                         if sub.invoice_id in paid_map:
                             inv = paid_map[sub.invoice_id]
+                            if not payment_matches(
+                                sub.plan,
+                                sub.user_id,
+                                inv.amount,
+                                inv.asset,
+                                inv.payload,
+                                currency="RUB",
+                                expected_asset="USDT",
+                            ):
+                                logger.error("Rejected mismatched CryptoBot payment for invoice %s", sub.invoice_id)
+                                continue
                             plan_days = subs_storage.get_plan_days(sub.plan)
                             expires_at = await subs_storage.get_renewal_expiry(sub.user_id, plan_days)
-                            await subs_storage.activate(
+                            activated = await subs_storage.activate(
                                 user_id=sub.user_id,
                                 plan=sub.plan,
                                 invoice_id=sub.invoice_id,
@@ -117,6 +154,8 @@ async def _poll_invoices_loop(
                                 paid_asset=inv.asset,
                                 expires_at=expires_at,
                             )
+                            if not activated:
+                                continue
                             reactivated = await url_storage.reactivate_chat(sub.user_id)
                             if reactivated > 0:
                                 logger.info("🔄 Subscription renewed for user %s — reactivated %s URL(s)", sub.user_id, reactivated)
@@ -125,7 +164,12 @@ async def _poll_invoices_loop(
                             expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
                             await telegram.send_message(
                                 sub.user_id,
-                                f"✅ Подписка активирована!\n\n📦 {sub.plan} дней\n⏰ До: {expires_str}",
+                                tr(
+                                    "invoice_paid_now",
+                                    language,
+                                    plan=f"{plan_days} days" if language == "en" else f"{plan_days} дней",
+                                    expires=expires_str,
+                                ),
                             )
         except Exception:
             logger.exception("Invoice polling error")
@@ -156,10 +200,13 @@ async def _expire_subscriptions_loop(
                 logger.info("⏰ %s expired subscription(s) found", len(expired))
             for sub in expired:
                 try:
-                    await telegram.send_subscription_expired(sub.user_id)
-                    await subs_storage.mark_expired(sub.user_id)
-                    await url_storage.deactivate_chat(sub.user_id)
-                    logger.info("⏰ Expired subscription for user %s — URLs deactivated, user notified", sub.user_id)
+                    notified = await telegram.send_subscription_expired(sub.user_id)
+                    if not notified:
+                        logger.warning("Could not notify user %s about subscription expiry", sub.user_id)
+                    marked = await subs_storage.mark_expired(sub.user_id, sub.expires_at)
+                    if marked:
+                        await url_storage.deactivate_chat(sub.user_id)
+                    logger.info("⏰ Expired subscription for user %s — URLs deactivated=%s", sub.user_id, marked)
                 except Exception:
                     logger.exception("Failed to expire subscription for user %s", sub.user_id)
 
@@ -168,8 +215,11 @@ async def _expire_subscriptions_loop(
                 logger.info("🔔 %s subscription(s) expiring within 1 day", len(expiring))
             for sub in expiring:
                 try:
-                    await telegram.send_subscription_expiring_soon(sub.user_id)
-                    await subs_storage.mark_expiry_reminder_sent(sub.user_id)
+                    notified = await telegram.send_subscription_expiring_soon(sub.user_id)
+                    if notified:
+                        await subs_storage.mark_expiry_reminder_sent(sub.user_id, sub.expires_at)
+                    else:
+                        logger.warning("Could not send expiry reminder to user %s", sub.user_id)
                 except Exception:
                     logger.exception("Failed to send expiry reminder to user %s", sub.user_id)
         except Exception:
@@ -196,13 +246,15 @@ async def _poll_platega_loop(
             for sub in expired_pending:
                 if sub.payment_gateway != "platega":
                     continue
-                await subs_storage.cancel_pending(sub.user_id)
+                if sub.payment_hash is None or not await platega_client.cancel_transaction(sub.payment_hash):
+                    logger.warning("Could not cancel expired Platega transaction %s", sub.payment_hash)
+                    continue
+                if not await subs_storage.cancel_pending(sub.user_id, sub.invoice_id, "platega"):
+                    continue
                 language = await telegram.get_language(sub.user_id)
                 await telegram.send_message(
                     sub.user_id,
-                    "⏰ Ссылка на оплату истекла.\n\nВремя на оплату истекло (30 минут). Создайте новый счёт."
-                    if language == "ru"
-                    else "⏰ Payment link expired.\n\nPayment time expired (30 minutes). Create a new invoice.",
+                    tr("invoice_cancelled", language),
                 )
 
             pending = await subs_storage.get_pending_invoices()
@@ -212,10 +264,25 @@ async def _poll_platega_loop(
                 if sub.payment_hash is None:
                     continue
                 txn = await platega_client.get_payment_status(sub.payment_hash)
-                if txn is not None and txn.status == "CONFIRMED":
+                if (
+                    txn is not None
+                    and txn.status == "CONFIRMED"
+                    and txn.transaction_id == sub.payment_hash
+                ):
+                    if not payment_matches(
+                        sub.plan,
+                        sub.user_id,
+                        txn.amount,
+                        txn.currency,
+                        txn.payload,
+                        currency=txn.currency,
+                        expected_asset="RUB",
+                    ):
+                        logger.error("Rejected mismatched Platega payment %s", sub.payment_hash)
+                        continue
                     plan_days = subs_storage.get_plan_days(sub.plan)
                     expires_at = await subs_storage.get_renewal_expiry(sub.user_id, plan_days)
-                    await subs_storage.activate(
+                    activated = await subs_storage.activate(
                         user_id=sub.user_id,
                         plan=sub.plan,
                         invoice_id=sub.invoice_id or 0,
@@ -224,6 +291,8 @@ async def _poll_platega_loop(
                         paid_asset=txn.currency,
                         expires_at=expires_at,
                     )
+                    if not activated:
+                        continue
                     reactivated = await url_storage.reactivate_chat(sub.user_id)
                     if reactivated > 0:
                         logger.info("🔄 Subscription renewed for user %s — reactivated %s URL(s)", sub.user_id, reactivated)
@@ -232,7 +301,12 @@ async def _poll_platega_loop(
                     expires_str = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y %H:%M")
                     await telegram.send_message(
                         sub.user_id,
-                        f"✅ Оплата через СБП подтверждена!\n\n📦 {sub.plan} дней\n⏰ До: {expires_str}",
+                        tr(
+                            "sbp_paid_now",
+                            language,
+                            plan=f"{plan_days} days" if language == "en" else f"{plan_days} дней",
+                            expires=expires_str,
+                        ),
                     )
         except Exception:
             logger.exception("Platega payment polling error")
@@ -274,7 +348,11 @@ async def main() -> None:
     logger.info("─" * 40)
     logger.info("STEP 2/7: Connecting to database...")
     db = DatabaseConnection(settings.db_path)
-    await db.connect()
+    try:
+        await db.connect()
+    except Exception:
+        await _close_started_resources(db=db)
+        raise
     logger.info("✅ Database connected and schema verified")
 
     # ── 3. URL Storage ──────────────────────────────────────────
@@ -305,7 +383,11 @@ async def main() -> None:
         request_delay=settings.request_delay,
         metrics=metrics,
     )
-    await client.start()
+    try:
+        await client.start()
+    except Exception:
+        await _close_started_resources(db=db)
+        raise
     logger.info("✅ Mercari client started")
     logger.info("   Max concurrency: %s", settings.max_concurrency)
     logger.info("   Request delay: %s", settings.request_delay)
@@ -317,7 +399,11 @@ async def main() -> None:
     crypto_client: CryptoPayClient | None = None
     if settings.cryptobot_api_token:
         crypto_client = CryptoPayClient(settings.cryptobot_api_token)
-        await crypto_client.start()
+        try:
+            await crypto_client.start()
+        except Exception:
+            await _close_started_resources(db=db, client=client, crypto_client=crypto_client)
+            raise
         logger.info("✅ CryptoBot client started")
     else:
         logger.info("⚠️  CRYPTOBOT_API_TOKEN is empty — CryptoBot payments disabled")
@@ -328,7 +414,14 @@ async def main() -> None:
     platega_client: PlategaClient | None = None
     if settings.platega_merchant_id and settings.platega_secret:
         platega_client = PlategaClient(settings.platega_merchant_id, settings.platega_secret)
-        await platega_client.start()
+        try:
+            await platega_client.start()
+        except Exception:
+            await _close_started_resources(
+                db=db, client=client, crypto_client=crypto_client,
+                platega_client=platega_client,
+            )
+            raise
         logger.info("✅ Platega client started (merchant %s...)", settings.platega_merchant_id[:8])
     else:
         logger.info("⚠️  PLATEGA_MERCHANT_ID/PLATEGA_SECRET empty — Platega payments disabled")
@@ -369,7 +462,14 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     _install_signal_handlers(loop, watcher)
 
-    await telegram.start()
+    try:
+        await telegram.start()
+    except Exception:
+        await _close_started_resources(
+            db=db, client=client, crypto_client=crypto_client,
+            platega_client=platega_client, telegram=telegram,
+        )
+        raise
     logger.info("✅ Telegram bot started")
 
     # ── Metrics server ────────────────────────────────────────────
@@ -381,7 +481,15 @@ async def main() -> None:
         sender=telegram,
         db_path=settings.db_path,
     )
-    await metrics_server.start()
+    try:
+        await metrics_server.start()
+    except Exception:
+        await _close_started_resources(
+            db=db, client=client, crypto_client=crypto_client,
+            platega_client=platega_client, telegram=telegram,
+            metrics_server=metrics_server,
+        )
+        raise
     logger.info("✅ Metrics server started on port %s", settings.metrics_port)
 
     # ── 7. Polling Loop ──────────────────────────────────────────
@@ -401,11 +509,10 @@ async def main() -> None:
         )
         logger.info("✅ Invoice polling started (interval: 30s)")
 
-    if crypto_client is not None or platega_client is not None:
-        expiry_task = asyncio.create_task(
-            _expire_subscriptions_loop(subs_storage, url_storage, telegram),
-        )
-        logger.info("✅ Subscription expiry checker started (interval: 10min)")
+    expiry_task = asyncio.create_task(
+        _expire_subscriptions_loop(subs_storage, url_storage, telegram),
+    )
+    logger.info("✅ Subscription expiry checker started (interval: 10min)")
 
     if platega_client is not None:
         platega_poll_task = asyncio.create_task(
@@ -418,7 +525,24 @@ async def main() -> None:
     logger.info("🎯 BOT IS RUNNING")
     logger.info("=" * 50)
 
-    await _notify_all_users(telegram, url_storage, "startup")
+    try:
+        await _notify_all_users(telegram, url_storage, "startup")
+    except Exception:
+        stop_event.set()
+        background_tasks = [
+            task for task in (poll_task, invoice_poll_task, platega_poll_task, expiry_task)
+            if task is not None
+        ]
+        for task in background_tasks:
+            task.cancel()
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
+        await _close_started_resources(
+            db=db, client=client, crypto_client=crypto_client,
+            platega_client=platega_client, telegram=telegram,
+            metrics_server=metrics_server,
+        )
+        raise
     logger.info("Bot started. Users can interact via Telegram.")
 
     cleanup_task = asyncio.create_task(watcher.cleanup_loop())

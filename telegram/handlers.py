@@ -25,6 +25,11 @@ from telegram.i18n import text
 
 logger = logging.getLogger(__name__)
 
+MAX_SEARCH_URL_LENGTH = 2048
+MAX_SEARCH_NAME_LENGTH = 128
+MAX_KEYWORD_LENGTH = 200
+MAX_BROADCAST_LENGTH = 4096
+
 # Тип обработчика: (argument, chat_id, user_id) -> response text (async).
 # user_id — Telegram account id отправителя (message.from.id); нужен для
 # проверки прав администратора в админ-командах.
@@ -187,6 +192,8 @@ def make_handlers(
         clean_url, name, source = _parse_add_input(url)
         if not clean_url:
             return text("provide_search", language)
+        if len(clean_url) > MAX_SEARCH_URL_LENGTH or (name is not None and len(name) > MAX_SEARCH_NAME_LENGTH):
+            return text("url_input_too_long", language)
 
         # If input is not a URL, treat it as a keyword → construct Mercari search URL
         if not clean_url.startswith("http"):
@@ -208,6 +215,9 @@ def make_handlers(
             logger.warning("   ⚠️  Invalid domain from user %s: %s", chat_id, clean_url[:50])
             return text("invalid_domain", language)
 
+        if source == "keyword" and len(name or "") > MAX_KEYWORD_LENGTH:
+            return text("url_input_too_long", language)
+
         # Validate URL by parsing it into a SearchCondition
         try:
             parse_search_url(clean_url)
@@ -218,7 +228,12 @@ def make_handlers(
         clean_url = normalize_search_url(clean_url)
         logger.debug("   🔧 Normalized URL: %s", clean_url)
 
-        is_new, url_id = await url_storage.add(clean_url, chat_id, name, source)
+        try:
+            is_new, url_id = await url_storage.add(clean_url, chat_id, name, source)
+        except ValueError as exc:
+            if "Maximum" in str(exc):
+                return text("url_limit_reached", language)
+            raise
         if is_new:
             watcher.force_reload()
             display_name = name or clean_url
@@ -441,6 +456,8 @@ def make_handlers(
             return text("no_permission", language)
         if not message_text:
             return format_broadcast_prompt(language)
+        if len(message_text) > MAX_BROADCAST_LENGTH:
+            return text("broadcast_too_long", language)
         logger.info("📢 Admin broadcast from user %s: '%s'", chat_id, message_text[:80])
 
         chat_ids = await url_storage.get_all_user_chat_ids()

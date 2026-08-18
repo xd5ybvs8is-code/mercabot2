@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS search_urls (
     user_chat_id TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
     added_at INTEGER NOT NULL,
+    bootstrapped_at INTEGER,
     source TEXT NOT NULL DEFAULT 'url',
     UNIQUE(url, user_chat_id)
 );
@@ -85,6 +86,13 @@ CREATE TABLE IF NOT EXISTS users (
 );
 """
 
+CREATE_TABLE_BOT_STATE_SQL = """
+CREATE TABLE IF NOT EXISTS bot_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
+
 # Existing users are discovered from the tables that already contain their
 # chat IDs. They keep the requested default language: Russian.
 MIGRATE_EXISTING_USERS_SQL = """
@@ -101,6 +109,10 @@ FROM notification_outbox;
 
 MIGRATE_DEACTIVATED_AT_SQL = """
 ALTER TABLE search_urls ADD COLUMN deactivated_at INTEGER;
+"""
+
+MIGRATE_BOOTSTRAPPED_AT_SQL = """
+ALTER TABLE search_urls ADD COLUMN bootstrapped_at INTEGER;
 """
 
 MIGRATE_URL_SOURCE_SQL = """
@@ -220,6 +232,10 @@ class DatabaseConnection:
         # иначе commit одной фиксировал бы незавершённую работу другой.
         self._tx_lock = asyncio.Lock()
 
+    async def _has_column(self, table: str, column: str) -> bool:
+        rows = await self._conn.execute_fetchall(f"PRAGMA table_info({table})")
+        return any(row[1] == column for row in rows)
+
     async def connect(self) -> None:
         logger.info("⏳ Connecting to database: %s", self._db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +261,7 @@ class DatabaseConnection:
         await self._conn.execute(CREATE_TABLE_USER_DEVICES_SQL)
         logger.debug("  • Creating table: users...")
         await self._conn.execute(CREATE_TABLE_USERS_SQL)
+        await self._conn.execute(CREATE_TABLE_BOT_STATE_SQL)
         await self._conn.execute(MIGRATE_EXISTING_USERS_SQL)
         logger.debug("  • Creating table: subscriptions...")
         await self._conn.execute(CREATE_TABLE_SUBSCRIPTIONS_SQL)
@@ -260,41 +277,34 @@ class DatabaseConnection:
         await self._conn.execute(CREATE_INDEX_NOTIFICATION_OUTBOX_SQL)
         await self._conn.execute(CREATE_INDEX_PROMO_REDEMPTIONS_USER_SQL)
         logger.debug("  • Running migration: users.ever_paid column...")
-        try:
+        if not await self._has_column("users", "ever_paid"):
             await self._conn.execute(MIGRATE_USER_EVER_PAID_SQL)
-        except Exception:
-            logger.debug("  • users.ever_paid column already exists — skipping")
         logger.debug("  • Backfilling users.ever_paid from paid subscriptions...")
         await self._conn.execute(INSERT_PAID_USERS_SQL)
         await self._conn.execute(BACKFILL_USER_EVER_PAID_SQL)
         logger.debug("  • Running migration: deactivated_at column...")
-        try:
+        if not await self._has_column("search_urls", "deactivated_at"):
             await self._conn.execute(MIGRATE_DEACTIVATED_AT_SQL)
-        except Exception:
-            logger.debug("  • deactivated_at column already exists — skipping")
+        logger.debug("  • Running migration: bootstrapped_at column...")
+        if not await self._has_column("search_urls", "bootstrapped_at"):
+            await self._conn.execute(MIGRATE_BOOTSTRAPPED_AT_SQL)
         logger.debug("  • Running migration: source column...")
-        try:
+        source_added = False
+        if not await self._has_column("search_urls", "source"):
             await self._conn.execute(MIGRATE_URL_SOURCE_SQL)
-        except Exception:
-            logger.debug("  • source column already exists — skipping")
-        else:
+            source_added = True
+        if source_added:
             logger.debug("  • Backfilling source for existing URLs...")
             await self._conn.execute(BACKFILL_URL_SOURCE_SQL)
         logger.debug("  • Running migration: payment_gateway column...")
-        try:
+        if not await self._has_column("subscriptions", "payment_gateway"):
             await self._conn.execute(MIGRATE_PAYMENT_GATEWAY_SQL)
-        except Exception:
-            logger.debug("  • payment_gateway column already exists — skipping")
         logger.debug("  • Running migration: expiry_reminder_sent column...")
-        try:
+        if not await self._has_column("subscriptions", "expiry_reminder_sent"):
             await self._conn.execute(MIGRATE_EXPIRY_REMINDER_SENT_SQL)
-        except Exception:
-            logger.debug("  • expiry_reminder_sent column already exists — skipping")
         logger.debug("  • Running migration: promo_extended column...")
-        try:
+        if not await self._has_column("subscriptions", "promo_extended"):
             await self._conn.execute(MIGRATE_PROMO_EXTENDED_SQL)
-        except Exception:
-            logger.debug("  • promo_extended column already exists — skipping")
         await self._conn.commit()
         logger.info("=" * 50)
         logger.info("🗄️  DATABASE CONNECTED")

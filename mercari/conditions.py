@@ -125,6 +125,9 @@ def parse_search_url(url: str) -> SearchCondition:
     """
     parsed = urlparse(url.strip())
 
+    if parsed.scheme != "https" or parsed.hostname != "jp.mercari.com":
+        raise ValueError("Search URL must use https://jp.mercari.com")
+
     valid_search_paths = ("/search", "/en/search")
     if parsed.path.rstrip("/") not in valid_search_paths:
         raise ValueError(
@@ -142,9 +145,14 @@ def parse_search_url(url: str) -> SearchCondition:
         if not values:
             return None
         try:
-            return int(values[0])
+            value = int(values[0])
         except ValueError:
-            return None
+            raise ValueError(f"Parameter {key} must be an integer") from None
+        if key in {"brand_id", "category_id"} and value <= 0:
+            raise ValueError(f"Parameter {key} must be positive")
+        if key in {"price_min", "price_max"} and value < 0:
+            raise ValueError(f"Parameter {key} must not be negative")
+        return value
 
     def _first_str(key: str) -> str:
         values = qs.get(key)
@@ -162,6 +170,9 @@ def parse_search_url(url: str) -> SearchCondition:
         price_min=_first_int("price_min") or 0,
         price_max=_first_int("price_max") or 0,
     )
+
+    if condition.price_min and condition.price_max and condition.price_min > condition.price_max:
+        raise ValueError("price_min must not be greater than price_max")
 
     logger.info(
         "✅ Parsed search condition: keyword='%s', brand=%s, category=%s, "

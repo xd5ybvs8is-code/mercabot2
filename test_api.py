@@ -39,7 +39,7 @@ def _print_item(item, idx: int) -> None:
     print(f"  {idx:2}. ¥{item.price:>7,}  {item.id}  {title}")
 
 
-async def test_single_request(client: MercariClient) -> None:
+async def run_single_request(client: MercariClient) -> None:
     print("\n" + "=" * 70)
     print("ТЕСТ 1: один запрос к Mercari API")
     print("=" * 70)
@@ -56,7 +56,7 @@ async def test_single_request(client: MercariClient) -> None:
         _print_item(item, i)
 
 
-async def test_parallel_batch(client: MercariClient) -> None:
+async def run_parallel_batch(client: MercariClient) -> None:
     print("\n" + "=" * 70)
     print("ТЕСТ 2: 10 запросов параллельно (asyncio.gather)")
     print("=" * 70)
@@ -76,7 +76,7 @@ async def test_parallel_batch(client: MercariClient) -> None:
         print("Все 10 батчей прошли без ошибок.")
 
 
-async def test_url_parsing() -> None:
+async def run_url_parsing() -> None:
     print("\n" + "=" * 70)
     print("ТЕСТ 3: парсинг URL → SearchCondition")
     print("=" * 70)
@@ -103,13 +103,13 @@ async def main() -> None:
     print(f"Без Playwright, без cookies, прямой aiohttp + DPoP")
 
     # Сначала проверяем парсинг (без сети).
-    await test_url_parsing()
+    await run_url_parsing()
 
     # Затем — реальные запросы.
     dpop = DpopSigner(DEVICE_UUID)
     async with MercariClient(dpop, max_concurrency=5, request_delay=0.1) as client:
-        await test_single_request(client)
-        await test_parallel_batch(client)
+        await run_single_request(client)
+        await run_parallel_batch(client)
 
     print("\n" + "=" * 70)
     print("✅ Ядро Уровня B работает. Готово к интеграции в app.py (Этап 2).")

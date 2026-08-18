@@ -43,3 +43,18 @@ class UserStorage:
         cursor = await self._db.conn.execute("SELECT COUNT(*) FROM users")
         row = await cursor.fetchone()
         return row[0] if row else 0
+
+    async def get_state(self, key: str) -> str | None:
+        cursor = await self._db.conn.execute(
+            "SELECT value FROM bot_state WHERE key = ?", (key,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def set_state(self, key: str, value: str) -> None:
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "INSERT INTO bot_state (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )

@@ -1,4 +1,5 @@
 import os
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,16 +35,39 @@ def _parse_check_interval(raw: str | None) -> int:
     return interval
 
 
-def _parse_int(raw: str | None, default: int, name: str) -> int:
+def _parse_int(
+    raw: str | None,
+    default: int,
+    name: str,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
     if raw is None or raw.strip() == "":
         return default
-    return int(raw)
+    value = int(raw)
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{name} must be <= {maximum}")
+    return value
 
 
-def _parse_float(raw: str | None, default: float, name: str) -> float:
+def _parse_float(
+    raw: str | None,
+    default: float,
+    name: str,
+    *,
+    minimum: float | None = None,
+) -> float:
     if raw is None or raw.strip() == "":
         return default
-    return float(raw)
+    value = float(raw)
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    return value
 
 
 def _parse_admin_ids(raw: str | None) -> frozenset[str]:
@@ -58,8 +82,9 @@ def _parse_admin_ids(raw: str | None) -> frozenset[str]:
     for part in raw.split(","):
         token = part.strip()
         # Принимаем только положительные целые числа — это Telegram user_id.
-        if token and token.lstrip("+").isdigit():
-            ids.add(token)
+        normalized = token.lstrip("+")
+        if normalized.isdigit() and int(normalized) > 0:
+            ids.add(normalized)
     return frozenset(ids)
 
 
@@ -77,13 +102,13 @@ def load_settings(env_path: Path | None = None) -> Settings:
         telegram_token=telegram_token,
         check_interval=_parse_check_interval(os.getenv("CHECK_INTERVAL")),
         db_path=DEFAULT_DB_PATH,
-        max_concurrency=_parse_int(os.getenv("MAX_CONCURRENCY"), 10, "MAX_CONCURRENCY"),
-        request_delay=_parse_float(os.getenv("REQUEST_DELAY"), 0.3, "REQUEST_DELAY"),
-        tg_send_rate=_parse_int(os.getenv("TG_SEND_RATE"), 20, "TG_SEND_RATE"),
-        tg_chat_min_interval=_parse_float(os.getenv("TG_CHAT_MIN_INTERVAL"), 1.0, "TG_CHAT_MIN_INTERVAL"),
+        max_concurrency=_parse_int(os.getenv("MAX_CONCURRENCY"), 10, "MAX_CONCURRENCY", minimum=1),
+        request_delay=_parse_float(os.getenv("REQUEST_DELAY"), 0.3, "REQUEST_DELAY", minimum=0.0),
+        tg_send_rate=_parse_int(os.getenv("TG_SEND_RATE"), 20, "TG_SEND_RATE", minimum=1),
+        tg_chat_min_interval=_parse_float(os.getenv("TG_CHAT_MIN_INTERVAL"), 1.0, "TG_CHAT_MIN_INTERVAL", minimum=0.0),
         admin_user_ids=_parse_admin_ids(os.getenv("ADMIN_USER_IDS")),
         cryptobot_api_token=os.getenv("CRYPTOBOT_API_TOKEN", "").strip(),
         platega_merchant_id=os.getenv("PLATEGA_MERCHANT_ID", "").strip(),
         platega_secret=os.getenv("PLATEGA_SECRET", "").strip(),
-        metrics_port=_parse_int(os.getenv("METRICS_PORT"), 9090, "METRICS_PORT"),
+        metrics_port=_parse_int(os.getenv("METRICS_PORT"), 9090, "METRICS_PORT", minimum=1, maximum=65535),
     )

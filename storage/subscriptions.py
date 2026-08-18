@@ -98,20 +98,28 @@ class SubscriptionStorage:
         row = await cursor.fetchone()
         return await self._row_to_subscription(row) if row else None
 
-    async def create(self, user_id: str, plan: str, invoice_id: int, payment_gateway: str = "cryptobot") -> None:
+    async def create(
+        self,
+        user_id: str,
+        plan: str,
+        invoice_id: int,
+        payment_gateway: str = "cryptobot",
+        payment_hash: str | None = None,
+    ) -> None:
         now = int(time.time())
         async with self._db.transaction() as conn:
             await conn.execute(
-                "INSERT INTO subscriptions (user_id, plan, status, invoice_id, payment_gateway, created_at, updated_at) "
-                "VALUES (?, ?, 'pending', ?, ?, ?, ?) "
+                "INSERT INTO subscriptions (user_id, plan, status, invoice_id, payment_hash, payment_gateway, created_at, updated_at) "
+                "VALUES (?, ?, 'pending', ?, ?, ?, ?, ?) "
                 "ON CONFLICT(user_id) DO UPDATE SET "
                 "  plan = excluded.plan,"
                 "  status = 'pending',"
                 "  invoice_id = excluded.invoice_id,"
+                "  payment_hash = excluded.payment_hash,"
                 "  payment_gateway = excluded.payment_gateway,"
                 "  created_at = excluded.created_at,"
                 "  updated_at = excluded.updated_at",
-                (user_id, plan, invoice_id, payment_gateway, now, now),
+                (user_id, plan, invoice_id, payment_hash, payment_gateway, now, now),
             )
         logger.info("📝 Subscription pending for user %s (plan=%s, invoice=%s, gateway=%s)", user_id, plan, invoice_id, payment_gateway)
 
@@ -124,12 +132,12 @@ class SubscriptionStorage:
         paid_amount: str,
         paid_asset: str,
         expires_at: int,
-    ) -> None:
+    ) -> bool:
         now = int(time.time())
         async with self._db.transaction() as conn:
             prev_cursor = await conn.execute(
                 "SELECT plan, expires_at, promo_extended FROM subscriptions "
-                "WHERE user_id = ? AND invoice_id = ?",
+                "WHERE user_id = ? AND invoice_id = ? AND status = 'pending'",
                 (user_id, invoice_id),
             )
             prev = await prev_cursor.fetchone()
@@ -154,7 +162,7 @@ class SubscriptionStorage:
                 "  expiry_reminder_sent = NULL,"
                 "  promo_extended = ?,"
                 "  updated_at = ? "
-                "WHERE user_id = ? AND invoice_id = ?",
+                "WHERE user_id = ? AND invoice_id = ? AND status = 'pending'",
                 (now, expires_at, payment_hash, paid_amount, paid_asset, int(keep_promo), now, user_id, invoice_id),
             )
             if cursor.rowcount > 0:
@@ -166,17 +174,27 @@ class SubscriptionStorage:
                     "  updated_at = excluded.updated_at",
                     (user_id, now, now),
                 )
-        logger.info("✅ Subscription activated for user %s (plan=%s, expires=%s)", user_id, plan, expires_at)
+        activated = cursor.rowcount > 0
+        if activated:
+            logger.info("✅ Subscription activated for user %s (plan=%s, expires=%s)", user_id, plan, expires_at)
+        else:
+            logger.info("ℹ️ Subscription activation skipped for user %s (invoice=%s is no longer pending)", user_id, invoice_id)
+        return activated
 
-    async def mark_expired(self, user_id: str) -> None:
+    async def mark_expired(self, user_id: str, expected_expires_at: int | None = None) -> bool:
         now = int(time.time())
         async with self._db.transaction() as conn:
-            await conn.execute(
+            sql = (
                 "UPDATE subscriptions SET status = 'expired', updated_at = ? "
-                "WHERE user_id = ? AND status = 'active'",
-                (now, user_id),
+                "WHERE user_id = ? AND status = 'active'"
             )
-        logger.info("⏰ Subscription marked expired for user %s", user_id)
+            params: tuple[object, ...] = (now, user_id)
+            if expected_expires_at is not None:
+                sql += " AND expires_at <= ? AND expires_at = ?"
+                params += (now, expected_expires_at)
+            cursor = await conn.execute(sql, params)
+        logger.info("⏰ Subscription marked expired for user %s: %s", user_id, cursor.rowcount > 0)
+        return cursor.rowcount > 0
 
     async def get_all_expired_active(self) -> list[SubscriptionRow]:
         now = int(time.time())
@@ -214,15 +232,20 @@ class SubscriptionStorage:
                 result.append(sub)
         return result
 
-    async def mark_expiry_reminder_sent(self, user_id: str) -> None:
+    async def mark_expiry_reminder_sent(self, user_id: str, expected_expires_at: int | None = None) -> bool:
         now = int(time.time())
         async with self._db.transaction() as conn:
-            await conn.execute(
+            sql = (
                 "UPDATE subscriptions SET expiry_reminder_sent = ? "
-                "WHERE user_id = ? AND status = 'active'",
-                (now, user_id),
+                "WHERE user_id = ? AND status = 'active' AND expires_at > ?"
             )
-        logger.info("🔔 Expiry reminder marked sent for user %s", user_id)
+            params: tuple[object, ...] = (now, user_id, now)
+            if expected_expires_at is not None:
+                sql += " AND expires_at = ?"
+                params += (expected_expires_at,)
+            cursor = await conn.execute(sql, params)
+        logger.info("🔔 Expiry reminder marked sent for user %s: %s", user_id, cursor.rowcount > 0)
+        return cursor.rowcount > 0
 
     async def get_pending_invoices(self) -> list[SubscriptionRow]:
         cursor = await self._db.conn.execute(
@@ -250,7 +273,12 @@ class SubscriptionStorage:
                 result.append(sub)
         return result
 
-    async def cancel_pending(self, user_id: str) -> None:
+    async def cancel_pending(
+        self,
+        user_id: str,
+        invoice_id: int | None = None,
+        payment_gateway: str | None = None,
+    ) -> bool:
         """Отменяет неоплаченный счёт.
 
         Если у пользователя был активный доступ (expires_at ещё в будущем),
@@ -259,14 +287,22 @@ class SubscriptionStorage:
         """
         now = int(time.time())
         async with self._db.transaction() as conn:
-            await conn.execute(
+            sql = (
                 "UPDATE subscriptions SET "
                 "  status = CASE WHEN expires_at > ? THEN 'active' ELSE 'expired' END, "
                 "  updated_at = ? "
-                "WHERE user_id = ? AND status = 'pending'",
-                (now, now, user_id),
+                "WHERE user_id = ? AND status = 'pending'"
             )
-        logger.info("⏰ Pending subscription cancelled for user %s (active access restored if not expired)", user_id)
+            params: tuple[object, ...] = (now, now, user_id)
+            if invoice_id is not None:
+                sql += " AND invoice_id = ?"
+                params += (invoice_id,)
+            if payment_gateway is not None:
+                sql += " AND payment_gateway = ?"
+                params += (payment_gateway,)
+            cursor = await conn.execute(sql, params)
+        logger.info("⏰ Pending subscription cancelled for user %s: %s", user_id, cursor.rowcount > 0)
+        return cursor.rowcount > 0
 
     async def set_payment_hash(self, user_id: str, payment_hash: str) -> None:
         now = int(time.time())
@@ -288,7 +324,12 @@ class SubscriptionStorage:
         return row[0] if row else 0
 
     async def is_subscribed(self, user_id: str) -> bool:
-        return await self.get_active(user_id) is not None
+        cursor = await self._db.conn.execute(
+            "SELECT 1 FROM subscriptions "
+            "WHERE user_id = ? AND status IN ('active', 'pending') AND expires_at > ?",
+            (user_id, int(time.time())),
+        )
+        return await cursor.fetchone() is not None
 
     async def count_all(self) -> int:
         """Total subscriptions (pending + active)."""
@@ -309,6 +350,13 @@ class SubscriptionStorage:
     async def activate_trial(self, user_id: str, expires_at: int) -> bool:
         now = int(time.time())
         async with self._db.transaction() as conn:
+            current_cursor = await conn.execute(
+                "SELECT status FROM subscriptions WHERE user_id = ?", (user_id,),
+            )
+            current = await current_cursor.fetchone()
+            if current is not None and current["status"] == "pending":
+                logger.warning("⚠️ Trial blocked for user %s because payment is pending", user_id)
+                return False
             cursor = await conn.execute(
                 "INSERT OR IGNORE INTO trial_usages (user_id, used_at) VALUES (?, ?)",
                 (user_id, now),
@@ -324,6 +372,11 @@ class SubscriptionStorage:
                 "  status = 'active',"
                 "  subscribed_at = excluded.subscribed_at,"
                 "  expires_at = excluded.expires_at,"
+                "  invoice_id = NULL,"
+                "  payment_hash = NULL,"
+                "  paid_amount = NULL,"
+                "  paid_asset = NULL,"
+                "  payment_gateway = NULL,"
                 "  expiry_reminder_sent = NULL,"
                 "  promo_extended = 0,"
                 "  updated_at = excluded.updated_at",

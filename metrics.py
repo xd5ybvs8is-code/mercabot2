@@ -78,23 +78,31 @@ class MetricsCollector:
 
     def render_prometheus(self, snapshot: dict[str, tuple[str, float]]) -> str:
         lines: list[str] = []
+        declared: set[str] = set()
         for key, (name, value) in snapshot.items():
             labels = self._labels.get(key)
-            label_str = self._format_labels(labels)
             if key in self._counters:
-                lines.append(f"# TYPE {name} counter")
+                if name not in declared:
+                    lines.append(f"# TYPE {name} counter")
+                    declared.add(name)
+                label_str = self._format_labels(labels)
                 lines.append(f"{name}{label_str} {int(value)}")
             elif key in self._histograms:
-                lines.append(f"# TYPE {name} histogram")
+                if name not in declared:
+                    lines.append(f"# TYPE {name} histogram")
+                    declared.add(name)
                 h = self._histograms[key]
+                label_str = self._format_labels(labels)
                 lines.append(f"{name}_sum{label_str} {h.sum}")
                 lines.append(f"{name}_count{label_str} {h.count}")
                 for bound in _HISTOGRAM_BUCKETS + (float("+Inf"),):
-                    lines.append(
-                        f"{name}_bucket{label_str}{{le=\"{bound}\"}} {h.buckets.get(bound, 0)}"
-                    )
+                    bucket_labels = self._format_labels(labels, {"le": str(bound)})
+                    lines.append(f"{name}_bucket{bucket_labels} {h.buckets.get(bound, 0)}")
             else:
-                lines.append(f"# TYPE {name} gauge")
+                if name not in declared:
+                    lines.append(f"# TYPE {name} gauge")
+                    declared.add(name)
+                label_str = self._format_labels(labels)
                 lines.append(f"{name}{label_str} {value}")
         lines.append("")
         return "\n".join(lines)
@@ -149,11 +157,22 @@ class MetricsCollector:
         return key.split(",")[0]
 
     @staticmethod
-    def _format_labels(labels: dict[str, str] | None) -> str:
-        if not labels:
+    def _format_labels(
+        labels: dict[str, str] | None,
+        extra: dict[str, str] | None = None,
+    ) -> str:
+        merged = {**(labels or {}), **(extra or {})}
+        if not merged:
             return ""
-        items = ",".join(f'{k}="{v}"' for k, v in sorted(labels.items()))
+        items = ",".join(
+            f'{k}="{MetricsCollector._escape_label_value(str(v))}"'
+            for k, v in sorted(merged.items())
+        )
         return "{" + items + "}"
+
+    @staticmethod
+    def _escape_label_value(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 class MetricsServer:

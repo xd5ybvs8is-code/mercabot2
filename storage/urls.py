@@ -6,6 +6,9 @@ from storage.connection import DatabaseConnection
 
 logger = logging.getLogger(__name__)
 
+MAX_USER_URLS = 100
+MAX_OUTBOX_ROWS = 10000
+
 
 class SearchUrlRow(NamedTuple):
     id: int
@@ -72,6 +75,20 @@ class UrlStorage:
         )
         async with self._db.transaction() as conn:
             try:
+                existing_cursor = await conn.execute(
+                    "SELECT id FROM search_urls WHERE url = ? AND user_chat_id = ?",
+                    (url, user_chat_id),
+                )
+                existing = await existing_cursor.fetchone()
+                if existing is not None:
+                    return False, existing[0]
+                count_cursor = await conn.execute(
+                    "SELECT COUNT(*) FROM search_urls WHERE user_chat_id = ?",
+                    (user_chat_id,),
+                )
+                count_row = await count_cursor.fetchone()
+                if count_row is not None and count_row[0] >= MAX_USER_URLS:
+                    raise ValueError(f"Maximum of {MAX_USER_URLS} URLs per user reached")
                 cursor = await conn.execute(
                     "INSERT INTO search_urls (url, name, user_chat_id, active, added_at, source) "
                     "VALUES (?, ?, ?, 1, ?, ?)",
@@ -184,19 +201,19 @@ class UrlStorage:
     # ── seen_items ──────────────────────────────────────────────
 
     async def is_url_bootstrapped(self, search_url_id: int) -> bool:
-        """True if this URL has any seen_items recorded.
-
-        Used as a persistent "bootstrap done" flag: once a URL has been
-        fetched at least once, seen_items is non-empty and stays non-empty,
-        so a process restart won't re-bootstrap it (and thus swallow fresh
-        listings as "already seen").
-        """
+        """Return whether this URL has completed at least one fetch."""
         cursor = await self.conn.execute(
-            "SELECT 1 FROM seen_items WHERE search_url_id = ? LIMIT 1",
+            "SELECT bootstrapped_at FROM search_urls WHERE id = ?",
             (search_url_id,),
         )
         row = await cursor.fetchone()
-        return row is not None
+        return row is not None and row[0] is not None
+
+    async def mark_url_bootstrapped(self, search_url_id: int) -> None:
+        await self.conn.execute(
+            "UPDATE search_urls SET bootstrapped_at = COALESCE(bootstrapped_at, ?) WHERE id = ?",
+            (int(time.time()), search_url_id),
+        )
 
     async def get_seen_ids(self, search_url_id: int) -> set[str]:
         """Return all known item_ids for a given search URL."""
@@ -236,6 +253,16 @@ class UrlStorage:
         duplicate messages while Telegram is unavailable.
         """
         async with self._db.transaction() as conn:
+            duplicate_cursor = await conn.execute(
+                "SELECT id FROM notification_outbox WHERE item_id = ? AND search_url_id = ?",
+                (item_id, search_url_id),
+            )
+            if await duplicate_cursor.fetchone() is not None:
+                return None
+            count_cursor = await conn.execute("SELECT COUNT(*) FROM notification_outbox")
+            count_row = await count_cursor.fetchone()
+            if count_row is not None and count_row[0] >= MAX_OUTBOX_ROWS:
+                raise RuntimeError("Notification outbox is full")
             cursor = await conn.execute(
                 "INSERT OR IGNORE INTO notification_outbox "
                 "(item_id, search_url_id, chat_id, text, created_at) VALUES (?, ?, ?, ?, ?)",

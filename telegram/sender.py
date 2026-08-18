@@ -34,6 +34,7 @@ _DROPPED = 3      # превышен лимит попыток — сообще�
 _MAX_ATTEMPTS = 20
 # Durable-сообщения тоже не ретраим вечно — после этого порога сдаёмся.
 _MAX_DURABLE_ATTEMPTS = 100
+_MAX_QUEUE_SIZE = 5000
 
 
 class Priority:
@@ -63,6 +64,7 @@ class OutgoingMessage:
     attempts: int = field(default=0, compare=False)
     # Durable notification acknowledgement, called only after Telegram accepts it.
     on_success: Callable[[], Awaitable[None]] | None = field(default=None, compare=False)
+    on_drop: Callable[[], Awaitable[None]] | None = field(default=None, compare=False)
 
 
 class MessageSender:
@@ -153,6 +155,7 @@ class MessageSender:
         placeholder: str | None = None,
         is_subscribed: bool = False,
         on_success: Callable[[], Awaitable[None]] | None = None,
+        on_drop: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """Кладёт сообщение в очередь. Не блокирует.
 
@@ -161,6 +164,8 @@ class MessageSender:
           "admin" — клавиатура админ-панели (ADMIN_KEYBOARD);
           "none"  — без клавиатуры. При show_keyboard=False kind игнорируется.
         """
+        if self._queue.qsize() >= _MAX_QUEUE_SIZE:
+            raise RuntimeError("Telegram sender queue is full")
         self._seq += 1
         msg = OutgoingMessage(
             priority=priority,
@@ -174,6 +179,7 @@ class MessageSender:
             placeholder=placeholder,
             is_subscribed=is_subscribed,
             on_success=on_success,
+            on_drop=on_drop,
         )
         self._queue.put_nowait(msg)
         if self._metrics is not None:
@@ -393,6 +399,7 @@ class MessageSender:
                             msg.seq, _MAX_DURABLE_ATTEMPTS, msg.chat_id,
                         )
                         self._log_dropped_message(msg)
+                        await self._run_drop_callback(msg)
                         if self._metrics is not None:
                             await self._metrics.inc_counter("mercabot_notifications_failed_total")
                         return _DROPPED
@@ -408,6 +415,7 @@ class MessageSender:
                     msg.seq, _MAX_ATTEMPTS, msg.chat_id,
                 )
                 self._log_dropped_message(msg)
+                await self._run_drop_callback(msg)
                 if self._metrics is not None:
                     await self._metrics.inc_counter("mercabot_notifications_failed_total")
                 return _DROPPED
@@ -432,15 +440,21 @@ class MessageSender:
             try:
                 await msg.on_success()
             except Exception:
-                # Telegram already accepted the message. Retrying can produce
-                # a duplicate, but it prevents a DB acknowledgement failure
-                # from leaving the durable outbox stuck forever.
-                self._queue.put_nowait(msg)
+                # Telegram already accepted the message. Never resend it just
+                # because the local acknowledgement failed.
                 logger.exception("Failed to acknowledge delivered msg #%s", msg.seq)
-                return _FAILED
+                return _OK
         if self._metrics is not None:
             await self._metrics.inc_counter("mercabot_notifications_sent_total")
         return _OK
+
+    async def _run_drop_callback(self, msg: OutgoingMessage) -> None:
+        if msg.on_drop is None:
+            return
+        try:
+            await msg.on_drop()
+        except Exception:
+            logger.exception("Failed to finalize dropped durable msg #%s", msg.seq)
 
     def _log_dropped_message(self, msg: OutgoingMessage) -> None:
         """Записать потерянное сообщение в лог-файл на сервере."""
