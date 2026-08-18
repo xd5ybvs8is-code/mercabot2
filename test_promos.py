@@ -164,6 +164,55 @@ def test_promo_redemption_is_serialized(tmp_path) -> None:
     asyncio.run(_test_promo_redemption_is_serialized(tmp_path))
 
 
+def test_abandoned_purchase_keeps_active_promo_access(tmp_path) -> None:
+    asyncio.run(_test_abandoned_purchase_keeps_active_promo_access(tmp_path))
+
+
+async def _test_abandoned_purchase_keeps_active_promo_access(tmp_path) -> None:
+    db = DatabaseConnection(tmp_path / "state.db")
+    await db.connect()
+    storage = SubscriptionStorage(db)
+
+    promo = await storage.create_promo(5, "all", "admin")
+    assert (await storage.redeem_promo("user-1", promo.code)).success is True
+    before = await storage.get_any("user-1")
+    assert before is not None and before.status == "active"
+    assert before.expires_at is not None
+
+    await storage.create("user-1", "7d", 42)
+    pending = await storage.get_any("user-1")
+    assert pending is not None and pending.status == "pending"
+
+    await storage.cancel_pending("user-1")
+    after = await storage.get_any("user-1")
+    assert after is not None
+    assert after.status == "active"
+    assert after.expires_at == before.expires_at
+
+    await db.close()
+
+
+def test_cancel_pending_expires_without_future_expiry(tmp_path) -> None:
+    asyncio.run(_test_cancel_pending_expires_without_future_expiry(tmp_path))
+
+
+async def _test_cancel_pending_expires_without_future_expiry(tmp_path) -> None:
+    db = DatabaseConnection(tmp_path / "state.db")
+    await db.connect()
+    storage = SubscriptionStorage(db)
+    now = int(time.time())
+
+    await storage.create("new-user", "7d", 1)
+    await storage.cancel_pending("new-user")
+    assert (await storage.get_any("new-user")).status == "expired"
+
+    await storage.create("old-user", "7d", 2)
+    await storage.activate("old-user", "7d", 2, "hash", "100", "USDT", now - 1000)
+    await storage.create("old-user", "7d", 3)
+    await storage.cancel_pending("old-user")
+    assert (await storage.get_any("old-user")).status == "expired"
+
+    await db.close()
 async def _test_promo_redemption_is_serialized(tmp_path) -> None:
     db = DatabaseConnection(tmp_path / "state.db")
     await db.connect()

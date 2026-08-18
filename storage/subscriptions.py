@@ -250,14 +250,22 @@ class SubscriptionStorage:
         return result
 
     async def cancel_pending(self, user_id: str) -> None:
+        """Отменяет неоплаченный счёт.
+
+        Если у пользователя был активный доступ (expires_at ещё в будущем),
+        статус восстанавливается в 'active': начало покупки не должно
+        отнимать уже оплаченные/промо-дни при отказе от оплаты.
+        """
         now = int(time.time())
         async with self._db.transaction() as conn:
             await conn.execute(
-                "UPDATE subscriptions SET status = 'expired', updated_at = ? "
+                "UPDATE subscriptions SET "
+                "  status = CASE WHEN expires_at > ? THEN 'active' ELSE 'expired' END, "
+                "  updated_at = ? "
                 "WHERE user_id = ? AND status = 'pending'",
-                (now, user_id),
+                (now, now, user_id),
             )
-        logger.info("⏰ Pending subscription cancelled (expired) for user %s", user_id)
+        logger.info("⏰ Pending subscription cancelled for user %s (active access restored if not expired)", user_id)
 
     async def set_payment_hash(self, user_id: str, payment_hash: str) -> None:
         now = int(time.time())

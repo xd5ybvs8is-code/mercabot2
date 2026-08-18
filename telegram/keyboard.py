@@ -35,6 +35,7 @@ def build_keyboard_markup(
         "keyboard": keyboard,
         "resize_keyboard": True,
         "one_time_keyboard": False,
+        "is_persistent": True,
     }
     if placeholder:
         result["input_field_placeholder"] = placeholder
@@ -58,6 +59,7 @@ def build_admin_keyboard_markup(
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
+        "is_persistent": True,
     }
     if placeholder:
         result["input_field_placeholder"] = placeholder
@@ -75,6 +77,7 @@ def build_cancel_keyboard_markup(
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
+        "is_persistent": True,
     }
     if placeholder:
         result["input_field_placeholder"] = placeholder
@@ -95,6 +98,7 @@ def build_admin_whitelist_keyboard_markup(
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
+        "is_persistent": True,
     }
     if placeholder:
         result["input_field_placeholder"] = placeholder
@@ -115,6 +119,7 @@ def build_admin_promo_keyboard_markup(
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
+        "is_persistent": True,
     }
     if placeholder:
         result["input_field_placeholder"] = placeholder
@@ -133,6 +138,7 @@ def build_add_type_keyboard_markup(
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
+        "is_persistent": True,
     }
     if placeholder:
         result["input_field_placeholder"] = placeholder
@@ -151,6 +157,7 @@ def build_keyword_filter_keyboard_markup(
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
+        "is_persistent": True,
     }
     if placeholder:
         result["input_field_placeholder"] = placeholder
@@ -171,6 +178,7 @@ def build_price_filter_keyboard_markup(
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
+        "is_persistent": True,
     }
     if placeholder:
         result["input_field_placeholder"] = placeholder
@@ -190,6 +198,7 @@ def build_url_management_keyboard_markup(
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
+        "is_persistent": True,
     }
     if placeholder:
         result["input_field_placeholder"] = placeholder
