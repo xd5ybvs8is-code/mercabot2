@@ -164,7 +164,7 @@ class MercariWatcher:
             if new_urls:
                 logger.info("   Bootstrap phase: %s URLs to bootstrap", len(new_urls))
                 results = await asyncio.gather(
-                    *(self._fetch_one(url_row, is_bootstrap=True) for url_row in new_urls),
+                    *(self._bootstrap_group(rows) for rows in self._group_by_url(new_urls).values()),
                     return_exceptions=True,
                 )
                 errors = [r for r in results if isinstance(r, Exception)]
@@ -197,10 +197,16 @@ class MercariWatcher:
                     logger.info("⏹️  Stop requested after bootstrap pause — exiting main loop")
                     break
 
-            # Main watch: parallel fetch, then diff
-            logger.info("   🔄 Fetching %s URLs in parallel...", len(urls))
+            # Main watch: fetch each unique URL once, then diff per row.
+            # Одинаковый URL у нескольких пользователей запрашивается один раз —
+            # diff и уведомления по-прежнему независимы для каждой строки.
+            url_groups = self._group_by_url(urls)
+            logger.info(
+                "   🔄 Fetching %s unique URL(s) in parallel (from %s row(s))...",
+                len(url_groups), len(urls),
+            )
             results = await asyncio.gather(
-                *[self._fetch_and_process(url_row) for url_row in urls],
+                *[self._fetch_and_process_group(rows) for rows in url_groups.values()],
                 return_exceptions=True,
             )
 
@@ -257,50 +263,78 @@ class MercariWatcher:
         while self._paused and not self._stop:
             await asyncio.sleep(1.0)
 
-    async def _fetch_one(self, url_row: SearchUrlRow, *, is_bootstrap: bool = False) -> None:
-        """Fetch items for a single URL. If bootstrap, mark all as seen."""
-        mode = "BOOTSTRAP" if is_bootstrap else "WATCH"
-        logger.info("   📥 [%s] Fetching URL #%s (%s)", mode, url_row.id, url_row.name)
+    @staticmethod
+    def _group_by_url(url_rows: list[SearchUrlRow]) -> dict[str, list[SearchUrlRow]]:
+        """Group URL rows by their literal url string.
+
+        Один и тот же URL, добавленный разными пользователями, возвращает
+        одинаковую выдачу Mercari — её можно запросить один раз и раздать
+        diff/уведомления по каждой строке независимо.
+        """
+        groups: dict[str, list[SearchUrlRow]] = {}
+        for row in url_rows:
+            groups.setdefault(row.url, []).append(row)
+        return groups
+
+    async def _bootstrap_group(self, url_rows: list[SearchUrlRow]) -> None:
+        """Fetch a URL once and bootstrap each row sharing it (mark seen)."""
+        first = url_rows[0]
+        logger.info(
+            "   📥 [BOOTSTRAP] Fetching URL %s for %s row(s)",
+            first.url[:80], len(url_rows),
+        )
         async with self._semaphore:
             try:
-                condition = parse_search_url(url_row.url)
-                signer = await self._devices.get_signer(url_row.user_chat_id)
+                condition = parse_search_url(first.url)
+                signer = await self._devices.get_signer(first.user_chat_id)
                 items = await self._client.search(condition, dpop=signer)
             except Exception as exc:
-                logger.error("   ❌ [%s] Fetch failed for URL #%s: %s", mode, url_row.id, exc)
+                logger.error("   ❌ [BOOTSTRAP] Fetch failed for URL %s: %s", first.url[:80], exc)
                 raise
 
-            current_ids = {item.id for item in items}
-            logger.info("   ✅ [%s] URL #%s returned %s items", mode, url_row.id, len(items))
+        current_ids = {item.id for item in items}
+        logger.info(
+            "   ✅ [BOOTSTRAP] URL %s returned %s items",
+            first.url[:80], len(items),
+        )
 
-            if is_bootstrap:
-                # Атомарная фиксация состояния бутстрапа для URL.
-                logger.info("   💾 [BOOTSTRAP] Saving %s items to seen_items + items tables...", len(items))
-                async with self._url_storage.transaction() as conn:
-                    await self._url_storage.mark_seen_bulk(url_row.id, list(current_ids))
-                    await self._url_storage.insert_items_bulk(url_row.id, items)
-                    await self._url_storage.mark_url_bootstrapped(url_row.id)
-                logger.info(
-                    "   ✅ [BOOTSTRAP] URL #%s: %s items marked as seen and stored",
-                    url_row.id, len(items),
-                )
-            else:
-                await self._process_new_items(items, current_ids, url_row)
+        for url_row in url_rows:
+            # Атомарная фиксация состояния бутстрапа для каждого URL.
+            logger.info(
+                "   💾 [BOOTSTRAP] Saving %s items to seen_items + items tables (URL #%s)...",
+                len(items), url_row.id,
+            )
+            async with self._url_storage.transaction():
+                await self._url_storage.mark_seen_bulk(url_row.id, list(current_ids))
+                await self._url_storage.insert_items_bulk(url_row.id, items)
+                await self._url_storage.mark_url_bootstrapped(url_row.id)
+            logger.info(
+                "   ✅ [BOOTSTRAP] URL #%s: %s items marked as seen and stored",
+                url_row.id, len(items),
+            )
 
-    async def _fetch_and_process(self, url_row: SearchUrlRow) -> None:
-        """Fetch and process new items for one URL (used in parallel)."""
-        logger.info("   📥 Fetching URL #%s (%s)", url_row.id, url_row.name)
+    async def _fetch_and_process_group(self, url_rows: list[SearchUrlRow]) -> None:
+        """Fetch a URL once, then diff/notify independently per row."""
+        first = url_rows[0]
+        logger.info(
+            "   📥 Fetching URL %s for %s row(s)",
+            first.url[:80], len(url_rows),
+        )
         async with self._semaphore:
             try:
-                condition = parse_search_url(url_row.url)
-                signer = await self._devices.get_signer(url_row.user_chat_id)
+                condition = parse_search_url(first.url)
+                signer = await self._devices.get_signer(first.user_chat_id)
                 items = await self._client.search(condition, dpop=signer)
             except Exception as exc:
-                logger.error("   ❌ Fetch failed for URL #%s: %s", url_row.id, exc)
+                logger.error("   ❌ Fetch failed for URL %s: %s", first.url[:80], exc)
                 raise
 
-            current_ids = {item.id for item in items}
-            logger.info("   ✅ URL #%s returned %s items — checking for new ones", url_row.id, len(items))
+        current_ids = {item.id for item in items}
+        logger.info(
+            "   ✅ URL %s returned %s items — checking for new ones",
+            first.url[:80], len(items),
+        )
+        for url_row in url_rows:
             await self._process_new_items(items, current_ids, url_row)
 
     async def _process_new_items(
