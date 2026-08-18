@@ -622,7 +622,7 @@ class TelegramNotifier:
                     keyboard_kind="price_filter",
                 )
                 return
-            if text in {button_text("all_products_type", language), "🛍️ Все товары"}:
+            if text in {button_text("all_products_type", language), "🔎 Все товары"}:
                 url = _build_keyword_search_url(keyword)
                 del self._awaiting[chat_id]
                 logger.info("   → User %s chose all products for keyword '%s'", chat_id, keyword)

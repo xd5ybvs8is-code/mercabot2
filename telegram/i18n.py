@@ -586,7 +586,7 @@ TEXTS: dict[str, dict[Language, str]] = {
         "en": "✅ SBP payment confirmed!\n\n📦 {plan}\n⏰ Until: {expires}",
     },
     "price_range_type": {"ru": "💴 Диапазон цены", "en": "💴 Price range"},
-    "all_products_type": {"ru": "🛍️ Все товары", "en": "🛍️ All products"},
+    "all_products_type": {"ru": "🔎 Все товары", "en": "🔎 All products"},
     "choose_keyword_filter": {
         "ru": "🔤 Ключевое слово: <b>{keyword}</b>\n\nВыберите вариант поиска:",
         "en": "🔤 Keyword: <b>{keyword}</b>\n\nChoose a search option:",

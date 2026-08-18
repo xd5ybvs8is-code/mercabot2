@@ -152,7 +152,7 @@ def build_keyword_filter_keyboard_markup(
     """Build keyword filter choice reply keyboard markup."""
     result: dict[str, Any] = {
         "keyboard": [
-            [{"text": button_text("price_range_type", language)}, {"text": button_text("all_products_type", language)}],
+            [{"text": button_text("all_products_type", language)}, {"text": button_text("price_range_type", language)}],
             [{"text": button_text("back", language)}],
         ],
         "resize_keyboard": True,
@@ -350,7 +350,7 @@ def build_help_inline_keyboard(language: str = "ru") -> dict[str, Any]:
     """Inline-клавиатура для сообщения помощи: кнопка 'Условия использования'."""
     return {"inline_keyboard": [
         [{"text": button_text("terms_of_use_button", language), "callback_data": "terms_open"}],
-        [{"text": button_text("support_button", language), "url": "https://t.me/eeveek"}],
+        [{"text": button_text("support_button", language), "url": "https://t.me/jpsupp0rt"}],
     ]}
 
 
