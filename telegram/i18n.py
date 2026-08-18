@@ -79,8 +79,8 @@ TEXTS: dict[str, dict[Language, str]] = {
         "en": "🔤 Send a keyword to search for.\n\nIt will also be used as the name.\n\nFor example:\nNike sneakers",
     },
     "enter_url": {
-        "ru": "🔗 Отлично! Теперь отправьте URL для этого поиска.\n\nИмя: <b>{name}</b>\n\nПример URL:\nhttps://jp.mercari.com/en/search?category_id=7021",
-        "en": "🔗 Great! Now send the URL for this search.\n\nName: <b>{name}</b>\n\nURL example:\nhttps://jp.mercari.com/en/search?category_id=7021",
+        "ru": "🔗 Отлично! Теперь отправьте URL для этого поиска.\n\nИмя: <b>{name}</b>\n\nПример URL:\nhttps://jp.mercari.com/en/search?category_id=7021\n\nОткуда взять URL - https://telegra.ph/Otkuda-vzyat-URL-08-18",
+        "en": "🔗 Great! Now send the URL for this search.\n\nName: <b>{name}</b>\n\nURL example:\nhttps://jp.mercari.com/en/search?category_id=7021\n\nWhere to get the URL - https://telegra.ph/Otkuda-vzyat-URL-08-18",
     },
     "internal_error": {"ru": "❌ Внутренняя ошибка.", "en": "❌ Internal error."},
     "url_renamed": {"ru": "✅ URL переименован в: {name}", "en": "✅ URL renamed to: {name}"},
