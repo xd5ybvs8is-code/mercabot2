@@ -139,6 +139,10 @@ MIGRATE_PROMO_EXTENDED_SQL = """
 ALTER TABLE subscriptions ADD COLUMN promo_extended INTEGER NOT NULL DEFAULT 0;
 """
 
+MIGRATE_PAYMENT_URL_SQL = """
+ALTER TABLE subscriptions ADD COLUMN payment_url TEXT;
+"""
+
 CREATE_TABLE_SUBSCRIPTIONS_SQL = """
 CREATE TABLE IF NOT EXISTS subscriptions (
     user_id       TEXT PRIMARY KEY,
@@ -151,6 +155,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     payment_hash  TEXT,
     paid_amount   TEXT,
     paid_asset    TEXT,
+    payment_url   TEXT,
     promo_extended INTEGER NOT NULL DEFAULT 0,
     created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at    INTEGER NOT NULL DEFAULT (unixepoch())
@@ -357,6 +362,9 @@ class DatabaseConnection:
         logger.debug("  • Running migration: promo_extended column...")
         if not await self._has_column("subscriptions", "promo_extended"):
             await self._conn.execute(MIGRATE_PROMO_EXTENDED_SQL)
+        logger.debug("  • Running migration: payment_url column...")
+        if not await self._has_column("subscriptions", "payment_url"):
+            await self._conn.execute(MIGRATE_PAYMENT_URL_SQL)
         await self._conn.commit()
         logger.info("=" * 50)
         logger.info("🗄️  DATABASE CONNECTED")

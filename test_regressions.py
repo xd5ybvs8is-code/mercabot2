@@ -206,6 +206,35 @@ async def _test_expired_platega_pending_is_cleared_locally(tmp_path) -> None:
     await db.close()
 
 
+def test_platega_payment_url_is_persisted(tmp_path) -> None:
+    asyncio.run(_test_platega_payment_url_is_persisted(tmp_path))
+
+
+async def _test_platega_payment_url_is_persisted(tmp_path) -> None:
+    db = DatabaseConnection(tmp_path / "state.db")
+    await db.connect()
+    storage = SubscriptionStorage(db)
+    await storage.create(
+        "user",
+        "7d",
+        1,
+        payment_gateway="platega",
+        payment_hash="txn-1",
+        payment_url="https://app.platega.io/pay/txn-1",
+    )
+    current = await storage.get_any("user")
+    assert current is not None and current.payment_url == "https://app.platega.io/pay/txn-1"
+    await db.close()
+
+
+def test_sbp_keyboard_omits_empty_payment_url() -> None:
+    from telegram.keyboard import build_sbp_invoice_keyboard
+
+    markup = build_sbp_invoice_keyboard("", "txn-1")
+    assert len(markup["inline_keyboard"]) == 2
+    assert all("url" not in button for row in markup["inline_keyboard"] for button in row)
+
+
 def test_bot_offset_state_persists(tmp_path) -> None:
     async def run() -> None:
         db = DatabaseConnection(tmp_path / "state.db")

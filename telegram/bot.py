@@ -1292,7 +1292,7 @@ class TelegramNotifier:
                 await self._show_subscription(chat_id)
             else:
                 markup = build_sbp_invoice_keyboard(
-                    txn.redirect_url if txn else "",
+                    sub.payment_url or "",
                     sub.payment_hash,
                     language,
                 )
@@ -1633,6 +1633,7 @@ class TelegramNotifier:
             chat_id, f"{plan_days}d", 0,
             payment_gateway="platega",
             payment_hash=txn.transaction_id,
+            payment_url=txn.redirect_url,
         )
         await self._client.answer_callback_query(cb_id)
 

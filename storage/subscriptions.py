@@ -24,6 +24,7 @@ class SubscriptionRow:
     paid_amount: str | None
     paid_asset: str | None
     payment_gateway: str | None
+    payment_url: str | None
     expiry_reminder_sent: int | None
     promo_extended: int
     created_at: int
@@ -106,21 +107,23 @@ class SubscriptionStorage:
         invoice_id: int,
         payment_gateway: str = "cryptobot",
         payment_hash: str | None = None,
+        payment_url: str | None = None,
     ) -> None:
         now = int(time.time())
         async with self._db.transaction() as conn:
             await conn.execute(
-                "INSERT INTO subscriptions (user_id, plan, status, invoice_id, payment_hash, payment_gateway, created_at, updated_at) "
-                "VALUES (?, ?, 'pending', ?, ?, ?, ?, ?) "
+                "INSERT INTO subscriptions (user_id, plan, status, invoice_id, payment_hash, payment_gateway, payment_url, created_at, updated_at) "
+                "VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(user_id) DO UPDATE SET "
                 "  plan = excluded.plan,"
                 "  status = 'pending',"
                 "  invoice_id = excluded.invoice_id,"
                 "  payment_hash = excluded.payment_hash,"
                 "  payment_gateway = excluded.payment_gateway,"
+                "  payment_url = excluded.payment_url,"
                 "  created_at = excluded.created_at,"
                 "  updated_at = excluded.updated_at",
-                (user_id, plan, invoice_id, payment_hash, payment_gateway, now, now),
+                (user_id, plan, invoice_id, payment_hash, payment_gateway, payment_url, now, now),
             )
         logger.info("📝 Subscription pending for user %s (plan=%s, invoice=%s, gateway=%s)", user_id, plan, invoice_id, payment_gateway)
 
@@ -789,6 +792,7 @@ class SubscriptionStorage:
             paid_amount=row["paid_amount"],
             paid_asset=row["paid_asset"],
             payment_gateway=row["payment_gateway"],
+            payment_url=row["payment_url"],
             expiry_reminder_sent=row["expiry_reminder_sent"],
             promo_extended=int(row["promo_extended"] or 0),
             created_at=row["created_at"],
