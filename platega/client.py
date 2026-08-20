@@ -155,6 +155,12 @@ class PlategaClient:
         return None
 
     async def cancel_transaction(self, transaction_id: str) -> bool:
+        """Best-effort cancel.
+
+        В публичном API Platega нет ручки отмены PENDING-платежа, поэтому
+        404/405 трактуются как «отменять нечего» и не считаются ошибкой.
+        Локальное состояние при этом остаётся источником истины.
+        """
         url = f"{PLATEGA_API_URL}/transaction/{transaction_id}/cancel"
         logger.debug("📤 Platega POST /transaction/%s/cancel", transaction_id)
 
@@ -164,6 +170,13 @@ class PlategaClient:
                 async with self.session.post(url, headers=headers) as resp:
                     if resp.status == 200:
                         logger.info("🗑️ Platega transaction #%s cancelled", transaction_id)
+                        return True
+                    if resp.status in (404, 405):
+                        logger.warning(
+                            "⚠️ Platega cancel endpoint unavailable (HTTP %s) for #%s — nothing to cancel",
+                            resp.status,
+                            transaction_id,
+                        )
                         return True
                     try:
                         data = await resp.json()

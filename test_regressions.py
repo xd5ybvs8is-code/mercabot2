@@ -148,6 +148,64 @@ def test_sender_does_not_resend_after_ack_failure() -> None:
     asyncio.run(run())
 
 
+def test_platega_cancel_is_best_effort_on_missing_endpoint() -> None:
+    asyncio.run(_test_platega_cancel_is_best_effort_on_missing_endpoint())
+
+
+async def _test_platega_cancel_is_best_effort_on_missing_endpoint() -> None:
+    from platega.client import PlategaClient
+
+    class FakeResponse:
+        def __init__(self, status: int) -> None:
+            self.status = status
+
+        async def json(self) -> dict:
+            return {"message": "not found"}
+
+    class FakeContext:
+        def __init__(self, status: int) -> None:
+            self._status = status
+
+        async def __aenter__(self) -> "FakeResponse":
+            return FakeResponse(self._status)
+
+        async def __aexit__(self, *args) -> None:
+            return None
+
+    class FakeSession:
+        def __init__(self, status: int) -> None:
+            self._status = status
+
+        def post(self, *_args, **_kwargs) -> "FakeContext":
+            return FakeContext(self._status)
+
+    for status in (404, 405):
+        client = PlategaClient("merchant", "secret")
+        client._session = FakeSession(status)
+        assert await client.cancel_transaction("txn-1") is True
+
+
+def test_expired_platega_pending_is_cleared_locally(tmp_path) -> None:
+    asyncio.run(_test_expired_platega_pending_is_cleared_locally(tmp_path))
+
+
+async def _test_expired_platega_pending_is_cleared_locally(tmp_path) -> None:
+    db = DatabaseConnection(tmp_path / "state.db")
+    await db.connect()
+    storage = SubscriptionStorage(db)
+    await storage.create("user", "7d", 1, payment_gateway="platega", payment_hash="txn-old")
+    await db.conn.execute(
+        "UPDATE subscriptions SET created_at = ? WHERE user_id = ?",
+        (int(time.time()) - 3600, "user"),
+    )
+    expired = await storage.get_expired_pending(timeout_minutes=30)
+    assert len(expired) == 1 and expired[0].payment_hash == "txn-old"
+    assert await storage.cancel_pending("user", 1, "platega") is True
+    current = await storage.get_any("user")
+    assert current is not None and current.status != "pending"
+    await db.close()
+
+
 def test_bot_offset_state_persists(tmp_path) -> None:
     async def run() -> None:
         db = DatabaseConnection(tmp_path / "state.db")

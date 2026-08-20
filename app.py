@@ -244,21 +244,8 @@ async def _poll_platega_loop(
     logger.info("=" * 50)
     while True:
         try:
-            expired_pending = await subs_storage.get_expired_pending(timeout_minutes=30)
-            for sub in expired_pending:
-                if sub.payment_gateway != "platega":
-                    continue
-                if sub.payment_hash is None or not await platega_client.cancel_transaction(sub.payment_hash):
-                    logger.warning("Could not cancel expired Platega transaction %s", sub.payment_hash)
-                    continue
-                if not await subs_storage.cancel_pending(sub.user_id, sub.invoice_id, "platega"):
-                    continue
-                language = await telegram.get_language(sub.user_id)
-                await telegram.send_message(
-                    sub.user_id,
-                    tr("invoice_cancelled", language),
-                )
-
+            # Сначала проверяем статусы: оплаченный счёт должен активироваться,
+            # даже если он уже старше 30 минут (гонка «оплатил перед истечением»).
             pending = await subs_storage.get_pending_invoices()
             for sub in pending:
                 if sub.payment_gateway != "platega":
@@ -310,6 +297,23 @@ async def _poll_platega_loop(
                             expires=expires_str,
                         ),
                     )
+
+            # Затем снимаем просроченные pending локально: удалённый cancel в
+            # публичном API Platega отсутствует, поэтому он best-effort и не
+            # должен блокировать очистку.
+            expired_pending = await subs_storage.get_expired_pending(timeout_minutes=30)
+            for sub in expired_pending:
+                if sub.payment_gateway != "platega":
+                    continue
+                if sub.payment_hash is not None and not await platega_client.cancel_transaction(sub.payment_hash):
+                    logger.warning("Could not cancel expired Platega transaction %s — clearing pending locally", sub.payment_hash)
+                if not await subs_storage.cancel_pending(sub.user_id, sub.invoice_id, "platega"):
+                    continue
+                language = await telegram.get_language(sub.user_id)
+                await telegram.send_message(
+                    sub.user_id,
+                    tr("invoice_cancelled", language),
+                )
         except Exception:
             logger.exception("Platega payment polling error")
         await asyncio.sleep(interval)

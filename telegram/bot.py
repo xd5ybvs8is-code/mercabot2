@@ -1287,8 +1287,7 @@ class TelegramNotifier:
             now = int(time.time())
             if sub.created_at and (now - sub.created_at) > 30 * 60:
                 if not await self._platega_client.cancel_transaction(sub.payment_hash):
-                    await self.send_message(chat_id, tr("invoice_error", language))
-                    return
+                    logger.warning("Could not cancel Platega transaction %s — clearing pending locally", sub.payment_hash)
                 await self._subs_storage.cancel_pending(chat_id, sub.invoice_id, "platega")
                 await self._show_subscription(chat_id)
             else:
@@ -1614,8 +1613,7 @@ class TelegramNotifier:
         existing = await self._subs_storage.get_any(chat_id)
         if existing is not None and existing.status == "pending":
             if existing.payment_hash and not await self._platega_client.cancel_transaction(existing.payment_hash):
-                await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
-                return
+                logger.warning("Could not cancel Platega transaction %s — clearing pending locally", existing.payment_hash)
             await self._subs_storage.cancel_pending(
                 chat_id, existing.invoice_id, "platega",
             )
@@ -1707,8 +1705,7 @@ class TelegramNotifier:
         now = int(time.time())
         if sub.created_at and (now - sub.created_at) > 30 * 60:
             if not await self._platega_client.cancel_transaction(txn_id):
-                await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
-                return
+                logger.warning("Could not cancel Platega transaction %s — clearing pending locally", txn_id)
             await self._subs_storage.cancel_pending(chat_id, sub.invoice_id, "platega")
             await self._client.answer_callback_query(cb_id, tr("invoice_cancelled", language), show_alert=True)
             if msg_id:
@@ -1732,8 +1729,7 @@ class TelegramNotifier:
             return
 
         if not await self._platega_client.cancel_transaction(txn_id):
-            await self._client.answer_callback_query(cb_id, tr("invoice_error", language), show_alert=True)
-            return
+            logger.warning("Could not cancel Platega transaction %s — clearing pending locally", txn_id)
         await self._subs_storage.cancel_pending(chat_id, sub.invoice_id, "platega")
         await self._client.answer_callback_query(cb_id)
         if msg_id:
