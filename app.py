@@ -71,20 +71,22 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop, watcher: MercariWa
             signal.signal(sig, lambda _signum, _frame: request_shutdown())
 
 
-async def _notify_all_users(
+async def _notify_admins(
     telegram: TelegramNotifier,
-    url_storage: UrlStorage,
+    admin_user_ids: frozenset[str],
     message_key: str,
 ) -> None:
-    """Sends a message to all users who have URLs in the database."""
+    """Sends a startup/shutdown message to the admin(s) only."""
     logger = logging.getLogger(__name__)
-    chat_ids = await url_storage.get_all_user_chat_ids()
-    logger.info("Sending notification to %s users: %s", len(chat_ids), message_key)
-    for chat_id in chat_ids:
+    if not admin_user_ids:
+        logger.info("No admin users configured — %s notification skipped", message_key)
+        return
+    logger.info("Sending %s notification to %s admin(s)", message_key, len(admin_user_ids))
+    for chat_id in admin_user_ids:
         language = await telegram.get_language(chat_id)
         message = format_startup(language) if message_key == "startup" else format_shutdown(language)
         await telegram.send_message(chat_id, message)
-    logger.info("Notification sent to all %s users", len(chat_ids))
+    logger.info("%s notification sent to all %s admin(s)", message_key, len(admin_user_ids))
 
 
 async def _poll_invoices_loop(
@@ -526,7 +528,7 @@ async def main() -> None:
     logger.info("=" * 50)
 
     try:
-        await _notify_all_users(telegram, url_storage, "startup")
+        await _notify_admins(telegram, settings.admin_user_ids, "startup")
     except Exception:
         stop_event.set()
         background_tasks = [
@@ -560,7 +562,7 @@ async def main() -> None:
         logger.info("=" * 50)
 
         logger.info("  • Notifying users about shutdown...")
-        await _notify_all_users(telegram, url_storage, "shutdown")
+        await _notify_admins(telegram, settings.admin_user_ids, "shutdown")
 
         logger.info("  • Stopping command polling...")
         stop_event.set()
