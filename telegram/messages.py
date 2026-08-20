@@ -107,7 +107,7 @@ def format_promo_list(entries: list[PromoCodeRow], language: str = "ru") -> str:
 
     now = int(datetime.now().timestamp())
     for promo in entries:
-        if promo.redeemed_by is not None:
+        if promo.max_uses is not None and promo.redemption_count >= promo.max_uses:
             status_key = "promo_status_used"
         elif not promo.active:
             status_key = "promo_status_inactive"
@@ -121,12 +121,15 @@ def format_promo_list(entries: list[PromoCodeRow], language: str = "ru") -> str:
             datetime.fromtimestamp(promo.expires_at).strftime("%d.%m.%Y")
             if promo.expires_at is not None else text("promo_never", language)
         )
-        if promo.redeemed_by is None:
+        if promo.redemption_count == 0:
             redeemed = text("promo_never", language)
         else:
-            redeemed = escape(promo.redeemed_by)
-            if promo.redeemed_at is not None:
-                redeemed += f" ({datetime.fromtimestamp(promo.redeemed_at).strftime('%d.%m.%Y %H:%M')})"
+            max_label = "∞" if promo.max_uses is None else str(promo.max_uses)
+            redeemed = f"{promo.redemption_count}/{max_label}"
+            if promo.redeemed_by is not None:
+                redeemed += f" — {escape(promo.redeemed_by)}"
+                if promo.redeemed_at is not None:
+                    redeemed += f" ({datetime.fromtimestamp(promo.redeemed_at).strftime('%d.%m.%Y %H:%M')})"
 
         result += text(
             "promo_list_row",

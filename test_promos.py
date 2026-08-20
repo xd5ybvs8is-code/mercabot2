@@ -260,19 +260,151 @@ async def _test_promo_custom_code(tmp_path) -> None:
     await db.close()
 
 
+def test_promo_unlimited_multi_use(tmp_path) -> None:
+    asyncio.run(_test_promo_unlimited_multi_use(tmp_path))
+
+
+async def _test_promo_unlimited_multi_use(tmp_path) -> None:
+    db = DatabaseConnection(tmp_path / "state.db")
+    await db.connect()
+    storage = SubscriptionStorage(db)
+
+    promo = await storage.create_promo(7, "all", "admin", max_uses=None)
+    assert promo.max_uses is None
+
+    for user in ("user-1", "user-2", "user-3"):
+        result = await storage.redeem_promo(user, promo.code)
+        assert result.success is True
+        sub = await storage.get_any(user)
+        assert sub is not None and sub.status == "active"
+
+    assert (await storage.redeem_promo("user-1", promo.code)).reason == "used"
+
+    entries = await storage.list_promos()
+    row = next(e for e in entries if e.code == promo.code)
+    assert row.redemption_count == 3
+    assert row.max_uses is None
+
+    await db.close()
+
+
+def test_promo_limited_multi_use(tmp_path) -> None:
+    asyncio.run(_test_promo_limited_multi_use(tmp_path))
+
+
+async def _test_promo_limited_multi_use(tmp_path) -> None:
+    db = DatabaseConnection(tmp_path / "state.db")
+    await db.connect()
+    storage = SubscriptionStorage(db)
+
+    promo = await storage.create_promo(3, "all", "admin", max_uses=2)
+    assert promo.max_uses == 2
+    assert (await storage.redeem_promo("user-1", promo.code)).success is True
+    assert (await storage.redeem_promo("user-2", promo.code)).success is True
+    assert (await storage.redeem_promo("user-3", promo.code)).reason == "used"
+    assert (await storage.redeem_promo("user-1", promo.code)).reason == "used"
+
+    entries = await storage.list_promos()
+    row = next(e for e in entries if e.code == promo.code)
+    assert row.redemption_count == 2
+
+    await db.close()
+
+
+def test_promo_max_uses_validation(tmp_path) -> None:
+    asyncio.run(_test_promo_max_uses_validation(tmp_path))
+
+
+async def _test_promo_max_uses_validation(tmp_path) -> None:
+    db = DatabaseConnection(tmp_path / "state.db")
+    await db.connect()
+    storage = SubscriptionStorage(db)
+
+    for bad in (0, -1):
+        try:
+            await storage.create_promo(7, "all", "admin", max_uses=bad)
+            assert False, f"max_uses={bad} must raise ValueError"
+        except ValueError:
+            pass
+
+    await db.close()
+
+
+def test_promo_redemptions_composite_pk_migration(tmp_path) -> None:
+    asyncio.run(_test_promo_redemptions_composite_pk_migration(tmp_path))
+
+
+async def _test_promo_redemptions_composite_pk_migration(tmp_path) -> None:
+    import aiosqlite
+
+    db_path = tmp_path / "state.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "CREATE TABLE promo_codes ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE,"
+            "duration_days INTEGER NOT NULL, audience TEXT NOT NULL DEFAULT 'all',"
+            "target_user_id TEXT, active INTEGER NOT NULL DEFAULT 1,"
+            "expires_at INTEGER, created_by TEXT NOT NULL, created_at INTEGER NOT NULL)"
+        )
+        await conn.execute(
+            "CREATE TABLE promo_redemptions ("
+            "promo_id INTEGER PRIMARY KEY, user_id TEXT NOT NULL,"
+            "redeemed_at INTEGER NOT NULL)"
+        )
+        await conn.execute(
+            "INSERT INTO promo_codes (code, duration_days, audience, active, created_by, created_at)"
+            "VALUES ('OLDCODE', 7, 'all', 1, 'admin', 1)"
+        )
+        await conn.execute(
+            "INSERT INTO promo_redemptions (promo_id, user_id, redeemed_at) "
+            "VALUES (1, 'old-user', 2)"
+        )
+        await conn.commit()
+
+    db = DatabaseConnection(db_path)
+    await db.connect()
+    storage = SubscriptionStorage(db)
+
+    redemption_cols = await db.conn.execute_fetchall(
+        "PRAGMA table_info(promo_redemptions)"
+    )
+    user_id_pk = next(int(row[5]) for row in redemption_cols if row[1] == "user_id")
+    assert user_id_pk != 0
+
+    assert (await storage.redeem_promo("old-user", "OLDCODE")).reason == "used"
+
+    promo = await storage.create_promo(3, "all", "admin", max_uses=None)
+    assert promo.max_uses is None
+    assert (await storage.redeem_promo("new-user-1", promo.code)).success is True
+    assert (await storage.redeem_promo("new-user-2", promo.code)).success is True
+
+    row = next(e for e in await storage.list_promos() if e.code == promo.code)
+    assert row.redemption_count == 2
+
+    await db.close()
+
+
 def test_promo_create_input_parser() -> None:
-    assert _parse_promo_create_input("7 | new_only | - | -") == (7, "new_only", None, None, None)
+    assert _parse_promo_create_input("7 | new_only | - | -") == (7, "new_only", None, None, None, 1)
     parsed = _parse_promo_create_input("30 | all | 12345 | 2099-12-31")
     assert parsed is not None
     assert parsed[:3] == (30, "all", "12345")
     assert parsed[4] is None
+    assert parsed[5] == 1
     assert _parse_promo_create_input("7 | something") is None
     assert _parse_promo_create_input("7 | new_only | bad") is None
-    assert _parse_promo_create_input("7 | all | - | - | -") == (7, "all", None, None, None)
-    assert _parse_promo_create_input("7 | all | - | - | SUMMER2026") == (7, "all", None, None, "SUMMER2026")
-    assert _parse_promo_create_input("7 | all | - | - | summer2026") == (7, "all", None, None, "SUMMER2026")
+    assert _parse_promo_create_input("7 | all | - | - | -") == (7, "all", None, None, None, 1)
+    assert _parse_promo_create_input("7 | all | - | - | SUMMER2026") == (7, "all", None, None, "SUMMER2026", 1)
+    assert _parse_promo_create_input("7 | all | - | - | summer2026") == (7, "all", None, None, "SUMMER2026", 1)
     assert _parse_promo_create_input("7 | all | - | - | bad code") is None
     assert _parse_promo_create_input("7 | all | - | - | " + "A" * 33) is None
+    assert _parse_promo_create_input("7 | all | - | - | - | 50") == (7, "all", None, None, None, 50)
+    assert _parse_promo_create_input("7 | all | - | - | - | ∞") == (7, "all", None, None, None, None)
+    assert _parse_promo_create_input("7 | all | - | - | - | 0") == (7, "all", None, None, None, None)
+    assert _parse_promo_create_input("7 | all | - | - | - | unlimited") == (7, "all", None, None, None, None)
+    assert _parse_promo_create_input("7 | all | - | - | - | bad") is None
+    assert _parse_promo_create_input("7 | all | - | - | - | -5") is None
+    assert _parse_promo_create_input("7 | all | - | - | - | 50 | extra") is None
 
 
 def test_subscription_screens_include_promo_button() -> None:

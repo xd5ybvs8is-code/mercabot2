@@ -37,10 +37,12 @@ class PromoCodeRow:
     duration_days: int
     audience: str
     target_user_id: str | None
+    max_uses: int | None
     active: bool
     expires_at: int | None
     created_by: str
     created_at: int
+    redemption_count: int
     redeemed_by: str | None
     redeemed_at: int | None
 
@@ -453,12 +455,19 @@ class SubscriptionStorage:
         target_user_id: str | None = None,
         expires_at: int | None = None,
         custom_code: str | None = None,
+        max_uses: int | None = 1,
     ) -> PromoCodeRow:
-        """Create a single-use promo code and return the generated code."""
+        """Create a promo code and return the generated code.
+
+        max_uses: None — без лимита (многоразовый), 1 — одноразовый,
+        N — до N разных пользователей (каждый максимум один раз).
+        """
         if duration_days <= 0:
             raise ValueError("Promo duration must be positive")
         if audience not in {"all", "new_only"}:
             raise ValueError("Unsupported promo audience")
+        if max_uses is not None and max_uses < 1:
+            raise ValueError("Promo max_uses must be None or positive")
 
         now = int(time.time())
         if expires_at is not None and expires_at <= now:
@@ -471,9 +480,9 @@ class SubscriptionStorage:
                 try:
                     cursor = await conn.execute(
                         "INSERT INTO promo_codes "
-                        "(code, duration_days, audience, target_user_id, active, expires_at, created_by, created_at) "
-                        "VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
-                        (candidate, duration_days, audience, target, expires_at, created_by, now),
+                        "(code, duration_days, audience, target_user_id, max_uses, active, expires_at, created_by, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                        (candidate, duration_days, audience, target, max_uses, expires_at, created_by, now),
                     )
                 except sqlite3.IntegrityError as exc:
                     raise ValueError("Promo code already exists") from exc
@@ -484,9 +493,9 @@ class SubscriptionStorage:
                     try:
                         cursor = await conn.execute(
                             "INSERT INTO promo_codes "
-                            "(code, duration_days, audience, target_user_id, active, expires_at, created_by, created_at) "
-                            "VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
-                            (candidate, duration_days, audience, target, expires_at, created_by, now),
+                            "(code, duration_days, audience, target_user_id, max_uses, active, expires_at, created_by, created_at) "
+                            "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                            (candidate, duration_days, audience, target, max_uses, expires_at, created_by, now),
                         )
                     except sqlite3.IntegrityError:
                         continue
@@ -496,8 +505,8 @@ class SubscriptionStorage:
                     raise RuntimeError("Failed to generate a unique promo code")
 
         logger.info(
-            "🎟 Promo code created: code=%s, days=%s, audience=%s, target=%s, by=%s",
-            candidate, duration_days, audience, target or "-", created_by,
+            "🎟 Promo code created: code=%s, days=%s, audience=%s, target=%s, max_uses=%s, by=%s",
+            candidate, duration_days, audience, target or "-", max_uses if max_uses is not None else "∞", created_by,
         )
         return PromoCodeRow(
             id=promo_id,
@@ -505,10 +514,12 @@ class SubscriptionStorage:
             duration_days=duration_days,
             audience=audience,
             target_user_id=target,
+            max_uses=max_uses,
             active=True,
             expires_at=expires_at,
             created_by=created_by,
             created_at=now,
+            redemption_count=0,
             redeemed_by=None,
             redeemed_at=None,
         )
@@ -516,10 +527,14 @@ class SubscriptionStorage:
     async def list_promos(self) -> list[PromoCodeRow]:
         cursor = await self._db.conn.execute(
             "SELECT p.id, p.code, p.duration_days, p.audience, p.target_user_id, "
-            "p.active, p.expires_at, p.created_by, p.created_at, "
-            "r.user_id AS redeemed_by, r.redeemed_at "
+            "p.max_uses, p.active, p.expires_at, p.created_by, p.created_at, "
+            "COUNT(r.user_id) AS redemption_count, "
+            "MAX(r.redeemed_at) AS redeemed_at, "
+            "(SELECT r2.user_id FROM promo_redemptions r2 "
+            " WHERE r2.promo_id = p.id ORDER BY r2.redeemed_at DESC, r2.user_id DESC LIMIT 1) AS redeemed_by "
             "FROM promo_codes p "
             "LEFT JOIN promo_redemptions r ON r.promo_id = p.id "
+            "GROUP BY p.id "
             "ORDER BY p.created_at DESC, p.id DESC",
         )
         rows = await cursor.fetchall()
@@ -530,10 +545,12 @@ class SubscriptionStorage:
                 duration_days=row["duration_days"],
                 audience=row["audience"],
                 target_user_id=row["target_user_id"],
+                max_uses=row["max_uses"],
                 active=bool(row["active"]),
                 expires_at=row["expires_at"],
                 created_by=row["created_by"],
                 created_at=row["created_at"],
+                redemption_count=int(row["redemption_count"] or 0),
                 redeemed_by=row["redeemed_by"],
                 redeemed_at=row["redeemed_at"],
             )
@@ -553,7 +570,7 @@ class SubscriptionStorage:
         return changed
 
     async def redeem_promo(self, user_id: str, raw_code: str) -> PromoRedemptionResult:
-        """Atomically validate, consume and apply a single-use promo code."""
+        """Atomically validate, consume and apply a promo code."""
         code = self.normalize_promo_code(raw_code)
         if not code:
             return PromoRedemptionResult(False, "not_found")
@@ -561,10 +578,11 @@ class SubscriptionStorage:
         now = int(time.time())
         async with self._db.transaction() as conn:
             cursor = await conn.execute(
-                "SELECT p.*, r.user_id AS redeemed_by "
+                "SELECT p.*, COUNT(r.user_id) AS redemption_count "
                 "FROM promo_codes p "
                 "LEFT JOIN promo_redemptions r ON r.promo_id = p.id "
-                "WHERE p.code = ?",
+                "WHERE p.code = ? "
+                "GROUP BY p.id",
                 (code,),
             )
             promo = await cursor.fetchone()
@@ -572,12 +590,15 @@ class SubscriptionStorage:
                 return PromoRedemptionResult(False, "not_found")
             if not promo["active"]:
                 return PromoRedemptionResult(False, "inactive")
-            if promo["redeemed_by"] is not None:
-                return PromoRedemptionResult(False, "used")
             if promo["expires_at"] is not None and promo["expires_at"] <= now:
                 return PromoRedemptionResult(False, "expired")
             if promo["target_user_id"] is not None and promo["target_user_id"] != user_id:
                 return PromoRedemptionResult(False, "target")
+
+            redemption_count = int(promo["redemption_count"] or 0)
+            max_uses = promo["max_uses"]
+            if max_uses is not None and redemption_count >= int(max_uses):
+                return PromoRedemptionResult(False, "used")
 
             user_cursor = await conn.execute(
                 "SELECT ever_paid FROM users WHERE chat_id = ?",

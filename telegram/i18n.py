@@ -504,39 +504,47 @@ TEXTS: dict[str, dict[Language, str]] = {
         "ru": (
             "➕ <b>Создание промокода</b>\n\n"
             "Отправьте параметры в формате:\n"
-            "<code>дни | тип | user_id или - | дата окончания или - | код или -</code>\n\n"
+            "<code>дни | тип | user_id или - | дата окончания или - | код или - | использований или -</code>\n\n"
             "Тип: <code>all</code> или <code>new_only</code>.\n"
             "Дата: <code>YYYY-MM-DD</code>.\n"
             "Код: своё название (буквы, цифры, дефис, до 32 символов) "
-            "или <code>-</code> для автогенерации.\n\n"
+            "или <code>-</code> для автогенерации.\n"
+            "Использований: <code>-</code> — одноразовый, число — лимит "
+            "активаций, <code>∞</code> (или <code>0</code>) — без лимита. "
+            "Каждый пользователь может активировать код только один раз.\n\n"
             "Примеры:\n"
-            "<code>7 | new_only | - | - | -</code>\n"
-            "<code>30 | all | 123456789 | 2026-12-31 | SUMMER2026</code>"
+            "<code>7 | new_only | - | - | - | -</code>\n"
+            "<code>30 | all | 123456789 | 2026-12-31 | SUMMER2026 | 50</code>\n"
+            "<code>7 | all | - | - | - | ∞</code>"
         ),
         "en": (
             "➕ <b>Create promo code</b>\n\n"
             "Send parameters in this format:\n"
-            "<code>days | type | user_id or - | expiration date or - | code or -</code>\n\n"
+            "<code>days | type | user_id or - | expiration date or - | code or - | uses or -</code>\n\n"
             "Type: <code>all</code> or <code>new_only</code>.\n"
             "Date: <code>YYYY-MM-DD</code>.\n"
             "Code: custom name (letters, digits, dash, up to 32 chars) "
-            "or <code>-</code> for auto-generation.\n\n"
+            "or <code>-</code> for auto-generation.\n"
+            "Uses: <code>-</code> — single use, a number — activation limit, "
+            "<code>∞</code> (or <code>0</code>) — unlimited. "
+            "Each user can activate the code only once.\n\n"
             "Examples:\n"
-            "<code>7 | new_only | - | - | -</code>\n"
-            "<code>30 | all | 123456789 | 2026-12-31 | SUMMER2026</code>"
+            "<code>7 | new_only | - | - | - | -</code>\n"
+            "<code>30 | all | 123456789 | 2026-12-31 | SUMMER2026 | 50</code>\n"
+            "<code>7 | all | - | - | - | ∞</code>"
         ),
     },
     "promo_create_invalid": {
-        "ru": "❌ Неверный формат. Пример: <code>7 | new_only | - | - | -</code>",
-        "en": "❌ Invalid format. Example: <code>7 | new_only | - | - | -</code>",
+        "ru": "❌ Неверный формат. Пример: <code>7 | new_only | - | - | - | -</code>",
+        "en": "❌ Invalid format. Example: <code>7 | new_only | - | - | - | -</code>",
     },
     "promo_create_taken": {
         "ru": "❌ Промокод <code>{code}</code> уже существует.",
         "en": "❌ Promo code <code>{code}</code> already exists.",
     },
     "promo_create_placeholder": {
-        "ru": "Например: 7 | new_only | - | - | -",
-        "en": "Example: 7 | new_only | - | - | -",
+        "ru": "Например: 7 | new_only | - | - | - | -",
+        "en": "Example: 7 | new_only | - | - | - | -",
     },
     "promo_created": {
         "ru": (
@@ -545,6 +553,7 @@ TEXTS: dict[str, dict[Language, str]] = {
             "Доступ: {days} дн.\n"
             "Аудитория: {audience}\n"
             "Пользователь: {target}\n"
+            "Использований: {uses}\n"
             "Действует до: {expires}"
         ),
         "en": (
@@ -553,9 +562,11 @@ TEXTS: dict[str, dict[Language, str]] = {
             "Access: {days} day(s)\n"
             "Audience: {audience}\n"
             "User: {target}\n"
+            "Uses: {uses}\n"
             "Valid until: {expires}"
         ),
     },
+    "promo_uses_unlimited": {"ru": "∞", "en": "∞"},
     "promo_deactivate_prompt": {
         "ru": "➖ Отправьте промокод, который нужно деактивировать.",
         "en": "➖ Send the promo code to deactivate.",
@@ -575,11 +586,11 @@ TEXTS: dict[str, dict[Language, str]] = {
     "promo_list_row": {
         "ru": (
             "• <code>{code}</code> — {days} дн., {audience}, {status}\n"
-            "  Пользователь: {target}; до: {expires}; использован: {redeemed}\n"
+            "  Пользователь: {target}; до: {expires}; использований: {redeemed}\n"
         ),
         "en": (
             "• <code>{code}</code> — {days} day(s), {audience}, {status}\n"
-            "  User: {target}; until: {expires}; redeemed: {redeemed}\n"
+            "  User: {target}; until: {expires}; uses: {redeemed}\n"
         ),
     },
     "promo_list_empty": {

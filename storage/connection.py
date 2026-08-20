@@ -172,6 +172,8 @@ CREATE TABLE IF NOT EXISTS whitelist (
 );
 """
 
+# max_uses: NULL — без лимита (многоразовый), 1 — одноразовый,
+# N — до N разных пользователей.
 CREATE_TABLE_PROMO_CODES_SQL = """
 CREATE TABLE IF NOT EXISTS promo_codes (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,6 +182,7 @@ CREATE TABLE IF NOT EXISTS promo_codes (
     audience        TEXT NOT NULL DEFAULT 'all'
                     CHECK (audience IN ('all', 'new_only')),
     target_user_id  TEXT,
+    max_uses        INTEGER CHECK (max_uses IS NULL OR max_uses > 0),
     active          INTEGER NOT NULL DEFAULT 1,
     expires_at      INTEGER,
     created_by      TEXT NOT NULL,
@@ -189,9 +192,10 @@ CREATE TABLE IF NOT EXISTS promo_codes (
 
 CREATE_TABLE_PROMO_REDEMPTIONS_SQL = """
 CREATE TABLE IF NOT EXISTS promo_redemptions (
-    promo_id    INTEGER PRIMARY KEY,
+    promo_id    INTEGER NOT NULL,
     user_id     TEXT NOT NULL,
     redeemed_at INTEGER NOT NULL,
+    PRIMARY KEY (promo_id, user_id),
     FOREIGN KEY (promo_id) REFERENCES promo_codes(id) ON DELETE CASCADE
 );
 """
@@ -199,6 +203,37 @@ CREATE TABLE IF NOT EXISTS promo_redemptions (
 CREATE_INDEX_PROMO_REDEMPTIONS_USER_SQL = """
 CREATE INDEX IF NOT EXISTS idx_promo_redemptions_user_id
 ON promo_redemptions(user_id);
+"""
+
+MIGRATE_PROMO_MAX_USES_SQL = """
+ALTER TABLE promo_codes ADD COLUMN max_uses INTEGER;
+"""
+
+BACKFILL_PROMO_MAX_USES_SQL = """
+UPDATE promo_codes SET max_uses = 1 WHERE max_uses IS NULL;
+"""
+
+CREATE_TABLE_PROMO_REDEMPTIONS_NEW_SQL = """
+CREATE TABLE promo_redemptions_new (
+    promo_id    INTEGER NOT NULL,
+    user_id     TEXT NOT NULL,
+    redeemed_at INTEGER NOT NULL,
+    PRIMARY KEY (promo_id, user_id),
+    FOREIGN KEY (promo_id) REFERENCES promo_codes(id) ON DELETE CASCADE
+);
+"""
+
+COPY_PROMO_REDEMPTIONS_SQL = """
+INSERT OR IGNORE INTO promo_redemptions_new (promo_id, user_id, redeemed_at)
+SELECT promo_id, user_id, redeemed_at FROM promo_redemptions;
+"""
+
+DROP_PROMO_REDEMPTIONS_SQL = """
+DROP TABLE promo_redemptions;
+"""
+
+RENAME_PROMO_REDEMPTIONS_SQL = """
+ALTER TABLE promo_redemptions_new RENAME TO promo_redemptions;
 """
 
 MIGRATE_USER_EVER_PAID_SQL = """
@@ -276,6 +311,23 @@ class DatabaseConnection:
         logger.debug("  • Creating index: idx_notification_outbox_created_at...")
         await self._conn.execute(CREATE_INDEX_NOTIFICATION_OUTBOX_SQL)
         await self._conn.execute(CREATE_INDEX_PROMO_REDEMPTIONS_USER_SQL)
+        logger.debug("  • Running migration: promo_codes.max_uses column...")
+        if not await self._has_column("promo_codes", "max_uses"):
+            await self._conn.execute(MIGRATE_PROMO_MAX_USES_SQL)
+            await self._conn.execute(BACKFILL_PROMO_MAX_USES_SQL)
+        logger.debug("  • Running migration: promo_redemptions composite PK...")
+        redemption_cols = await self._conn.execute_fetchall(
+            "PRAGMA table_info(promo_redemptions)"
+        )
+        user_id_pk = next(
+            (int(row[5]) for row in redemption_cols if row[1] == "user_id"), 0
+        )
+        if user_id_pk == 0:
+            await self._conn.execute(CREATE_TABLE_PROMO_REDEMPTIONS_NEW_SQL)
+            await self._conn.execute(COPY_PROMO_REDEMPTIONS_SQL)
+            await self._conn.execute(DROP_PROMO_REDEMPTIONS_SQL)
+            await self._conn.execute(RENAME_PROMO_REDEMPTIONS_SQL)
+            await self._conn.execute(CREATE_INDEX_PROMO_REDEMPTIONS_USER_SQL)
         logger.debug("  • Running migration: users.ever_paid column...")
         if not await self._has_column("users", "ever_paid"):
             await self._conn.execute(MIGRATE_USER_EVER_PAID_SQL)
@@ -310,7 +362,7 @@ class DatabaseConnection:
         logger.info("🗄️  DATABASE CONNECTED")
         logger.info("   Path: %s", self._db_path)
         logger.info("   Mode: WAL (Write-Ahead Logging)")
-        logger.info("   Tables: items, search_urls, seen_items, users, subscriptions, trial_usages, whitelist, promo_codes")
+        logger.info("   Tables: items, search_urls, seen_items, users, subscriptions, trial_usages, whitelist, promo_codes, promo_redemptions")
         logger.info("=" * 50)
 
     @asynccontextmanager

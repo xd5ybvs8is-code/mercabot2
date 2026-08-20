@@ -54,10 +54,14 @@ def _parse_add_input(text: str) -> tuple[str, str | None, str | None]:
 
 def _parse_promo_create_input(
     raw: str,
-) -> tuple[int, str, str | None, int | None, str | None] | None:
-    """Parse: days | audience | target_user_id | YYYY-MM-DD expiration | custom code or -."""
+) -> tuple[int, str, str | None, int | None, str | None, int | None] | None:
+    """Parse: days | audience | target_user_id | YYYY-MM-DD expiration | custom code or - | max_uses.
+
+    max_uses: "-" — одноразовый (1), положительное число — лимит N,
+    "∞"/"0"/"unlimited" — без лимита (None).
+    """
     parts = [part.strip() for part in raw.split("|")]
-    if len(parts) < 2 or len(parts) > 5:
+    if len(parts) < 2 or len(parts) > 6:
         return None
 
     days_part, audience = parts[0], parts[1].lower()
@@ -84,13 +88,23 @@ def _parse_promo_create_input(
             return None
 
     custom_code: str | None = None
-    if len(parts) == 5 and parts[4] not in {"", "-", "—"}:
+    if len(parts) >= 5 and parts[4] not in {"", "-", "—"}:
         try:
             custom_code = SubscriptionStorage.validate_custom_promo_code(parts[4])
         except ValueError:
             return None
 
-    return int(days_part), audience, target, expires_at, custom_code
+    max_uses: int | None = 1
+    if len(parts) == 6 and parts[5] not in {"", "-", "—"}:
+        token = parts[5].lower()
+        if token in {"∞", "0", "unlimited", "inf"}:
+            max_uses = None
+        elif token.isdigit() and int(token) >= 1:
+            max_uses = int(token)
+        else:
+            return None
+
+    return int(days_part), audience, target, expires_at, custom_code, max_uses
 
 
 def _metric(metric_stats: dict, name: str) -> float:
@@ -553,7 +567,7 @@ def make_handlers(
         parsed = _parse_promo_create_input(argument)
         if parsed is None:
             return text("promo_create_invalid", language)
-        days, audience, target, expires_at, custom_code = parsed
+        days, audience, target, expires_at, custom_code, max_uses = parsed
         try:
             promo = await subs_storage.create_promo(
                 duration_days=days,
@@ -562,6 +576,7 @@ def make_handlers(
                 target_user_id=target,
                 expires_at=expires_at,
                 custom_code=custom_code,
+                max_uses=max_uses,
             )
         except ValueError as exc:
             logger.warning("⚠️ Invalid promo creation request from admin %s", user_id)
@@ -574,6 +589,10 @@ def make_handlers(
             language,
         )
         target_label = target or text("promo_never", language)
+        uses_label = (
+            text("promo_uses_unlimited", language)
+            if max_uses is None else str(max_uses)
+        )
         expires_label = (
             datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y")
             if expires_at is not None else text("promo_never", language)
@@ -585,6 +604,7 @@ def make_handlers(
             days=days,
             audience=audience_label,
             target=escape(target_label),
+            uses=uses_label,
             expires=expires_label,
         )
 
