@@ -631,6 +631,19 @@ def make_handlers(
             return text("promo_deactivated", language, code=escape(normalized))
         return text("promo_deactivate_not_found", language, code=escape(normalized))
 
+    async def cmd_admin_promo_delete(code: str, chat_id: str, user_id: str, language: str) -> str:
+        if not _is_admin(user_id):
+            logger.warning("⛔ Non-admin user %s tried /admin_promo_delete", chat_id)
+            return text("no_permission", language)
+        if not code.strip():
+            return text("promo_delete_prompt", language)
+        if subs_storage is None:
+            return text("internal_error", language)
+        normalized = subs_storage.normalize_promo_code(code)
+        if await subs_storage.delete_promo(normalized):
+            return text("promo_deleted", language, code=escape(normalized))
+        return text("promo_delete_not_found", language, code=escape(normalized))
+
     return {
         # ── пользовательские ──
         "/help": cmd_help,
@@ -656,4 +669,5 @@ def make_handlers(
         "/admin_promo_create": cmd_admin_promo_create,
         "/admin_promo_list": cmd_admin_promo_list,
         "/admin_promo_deactivate": cmd_admin_promo_deactivate,
+        "/admin_promo_delete": cmd_admin_promo_delete,
     }

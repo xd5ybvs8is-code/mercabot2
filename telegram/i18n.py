@@ -22,6 +22,7 @@ TEXTS: dict[str, dict[Language, str]] = {
     "promo_create": {"ru": "➕ Создать промокод", "en": "➕ Create promo code"},
     "promo_list": {"ru": "📋 Список промокодов", "en": "📋 Promo code list"},
     "promo_deactivate": {"ru": "➖ Деактивировать промокод", "en": "➖ Deactivate promo code"},
+    "promo_delete": {"ru": "🗑 Удалить промокод", "en": "🗑 Delete promo code"},
     "back": {"ru": "🔙 Назад", "en": "🔙 Back"},
     "url_type": {"ru": "🔗 URL", "en": "🔗 URL"},
     "keyword_type": {"ru": "🔤 Ключевое слово", "en": "🔤 Keyword"},
@@ -578,6 +579,18 @@ TEXTS: dict[str, dict[Language, str]] = {
     "promo_deactivate_not_found": {
         "ru": "❌ Активный промокод <code>{code}</code> не найден.",
         "en": "❌ Active promo code <code>{code}</code> not found.",
+    },
+    "promo_delete_prompt": {
+        "ru": "🗑 Отправьте <b>деактивированный</b> промокод, который нужно удалить навсегда.\n\nПосле удаления название кода снова станет доступным.",
+        "en": "🗑 Send the <b>deactivated</b> promo code to delete permanently.\n\nAfter deletion, the code name will become available again.",
+    },
+    "promo_deleted": {
+        "ru": "✅ Промокод <code>{code}</code> удалён. Название снова доступно.",
+        "en": "✅ Promo code <code>{code}</code> deleted. The name is available again.",
+    },
+    "promo_delete_not_found": {
+        "ru": "❌ Деактивированный промокод <code>{code}</code> не найден. Удалить можно только деактивированный код — сначала деактивируйте его.",
+        "en": "❌ Deactivated promo code <code>{code}</code> not found. Only deactivated codes can be deleted — deactivate it first.",
     },
     "promo_list_title": {
         "ru": "📋 <b>Промокоды</b>\n\n",

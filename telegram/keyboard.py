@@ -115,6 +115,7 @@ def build_admin_promo_keyboard_markup(
             [{"text": button_text("promo_create", language)}],
             [{"text": button_text("promo_list", language)}],
             [{"text": button_text("promo_deactivate", language)}],
+            [{"text": button_text("promo_delete", language)}],
             [{"text": button_text("back", language)}],
         ],
         "resize_keyboard": True,
@@ -258,6 +259,8 @@ BUTTON_ACTIONS: dict[str, str] = {
     "📋 Promo code list": "/admin_promo_list",
     "➖ Деактивировать промокод": "__await_promo_deactivate__",
     "➖ Deactivate promo code": "__await_promo_deactivate__",
+    "🗑 Удалить промокод": "__await_promo_delete__",
+    "🗑 Delete promo code": "__await_promo_delete__",
 }
 
 PAGE_SIZE = 9
@@ -445,5 +448,6 @@ ADMIN_BUTTON_ACTIONS: frozenset[str] = frozenset(
         "/admin_promo_list",
         "__await_promo_create__",
         "__await_promo_deactivate__",
+        "__await_promo_delete__",
     }
 )

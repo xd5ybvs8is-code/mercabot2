@@ -413,3 +413,30 @@ def test_subscription_screens_include_promo_button() -> None:
     for markup in (build_subscription_inline_keyboard(), build_plan_selection_keyboard()):
         buttons = [button for row in markup["inline_keyboard"] for button in row]
         assert any(button["callback_data"] == "promo_enter" for button in buttons)
+
+
+def test_promo_delete_frees_code_name(tmp_path) -> None:
+    asyncio.run(_test_promo_delete_frees_code_name(tmp_path))
+
+
+async def _test_promo_delete_frees_code_name(tmp_path) -> None:
+    db = DatabaseConnection(tmp_path / "state.db")
+    await db.connect()
+    storage = SubscriptionStorage(db)
+
+    promo = await storage.create_promo(7, "all", "admin", custom_code="test")
+    assert (await storage.redeem_promo("user-1", promo.code)).success is True
+
+    assert await storage.delete_promo(promo.code) is False
+
+    assert await storage.deactivate_promo(promo.code) is True
+    assert (await storage.redeem_promo("user-2", promo.code)).reason == "inactive"
+
+    assert await storage.delete_promo(promo.code) is True
+    assert await storage.delete_promo(promo.code) is False
+
+    recreated = await storage.create_promo(3, "all", "admin", custom_code="test")
+    assert recreated.code == "TEST"
+    assert (await storage.redeem_promo("user-3", recreated.code)).success is True
+
+    await db.close()

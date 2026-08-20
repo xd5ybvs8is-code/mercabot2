@@ -556,6 +556,17 @@ class TelegramNotifier:
             await self._run_handler("/admin_promo_deactivate", text, chat_id, user_id, keyboard_kind="admin_promos")
             return
 
+        if state and state.get("phase") == "promo_delete":
+            if not self._is_admin(user_id):
+                logger.warning("⛔ Non-admin user %s in promo_delete state — ignoring", chat_id)
+                del self._awaiting[chat_id]
+                await self.send_message(chat_id, tr("no_permission", language))
+                return
+            del self._awaiting[chat_id]
+            logger.info("   → Admin %s deleting promo code", chat_id)
+            await self._run_handler("/admin_promo_delete", text, chat_id, user_id, keyboard_kind="admin_promos")
+            return
+
         if state and state.get("phase") == "promo_code":
             if self._subs_storage is None:
                 del self._awaiting[chat_id]
@@ -906,6 +917,17 @@ class TelegramNotifier:
             await self.send_message(
                 chat_id,
                 tr("promo_deactivate_prompt", language),
+                keyboard_kind="admin_promos",
+                placeholder=tr("promo_code_placeholder", language),
+            )
+            return
+
+        if action == "__await_promo_delete__":
+            logger.info("   → Admin %s pressed 'Delete promo code' button", chat_id)
+            self._awaiting[chat_id] = {"phase": "promo_delete"}
+            await self.send_message(
+                chat_id,
+                tr("promo_delete_prompt", language),
                 keyboard_kind="admin_promos",
                 placeholder=tr("promo_code_placeholder", language),
             )
@@ -2141,6 +2163,15 @@ class TelegramNotifier:
             await self.send_message(
                 chat_id,
                 tr("promo_deactivate_prompt", await self._get_language(chat_id)),
+                keyboard_kind="admin_promos",
+                placeholder=tr("promo_code_placeholder", await self._get_language(chat_id)),
+            )
+            return
+        if command == "/admin_promo_delete" and not argument and self._is_admin(user_id):
+            self._awaiting[chat_id] = {"phase": "promo_delete"}
+            await self.send_message(
+                chat_id,
+                tr("promo_delete_prompt", await self._get_language(chat_id)),
                 keyboard_kind="admin_promos",
                 placeholder=tr("promo_code_placeholder", await self._get_language(chat_id)),
             )

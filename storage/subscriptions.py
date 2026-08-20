@@ -595,6 +595,24 @@ class SubscriptionStorage:
             logger.info("🎟 Promo code deactivated: %s", code)
         return changed
 
+    async def delete_promo(self, raw_code: str) -> bool:
+        """Delete a deactivated promo code (frees the code name for reuse)."""
+        code = self.normalize_promo_code(raw_code)
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "DELETE FROM promo_redemptions WHERE promo_id IN "
+                "(SELECT id FROM promo_codes WHERE code = ? AND active = 0)",
+                (code,),
+            )
+            cursor = await conn.execute(
+                "DELETE FROM promo_codes WHERE code = ? AND active = 0",
+                (code,),
+            )
+            deleted = cursor.rowcount > 0
+        if deleted:
+            logger.info("🗑 Promo code deleted: %s", code)
+        return deleted
+
     async def redeem_promo(self, user_id: str, raw_code: str) -> PromoRedemptionResult:
         """Atomically validate, consume and apply a promo code."""
         code = self.normalize_promo_code(raw_code)
