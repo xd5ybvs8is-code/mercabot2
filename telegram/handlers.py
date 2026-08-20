@@ -6,7 +6,7 @@ from urllib.parse import quote_plus
 from datetime import datetime
 
 from mercari.conditions import parse_search_url, normalize_search_url
-from storage.urls import UrlStorage
+from storage.urls import UrlStorage, MAX_USER_URLS
 from storage.subscriptions import SubscriptionStorage
 from storage.users import UserStorage
 from mercari.watcher import MercariWatcher
@@ -232,7 +232,7 @@ def make_handlers(
             is_new, url_id = await url_storage.add(clean_url, chat_id, name, source)
         except ValueError as exc:
             if "Maximum" in str(exc):
-                return text("url_limit_reached", language)
+                return text("url_limit_reached", language, limit=MAX_USER_URLS)
             raise
         if is_new:
             watcher.force_reload()

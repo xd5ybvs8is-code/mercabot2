@@ -6,7 +6,7 @@ from storage.connection import DatabaseConnection
 
 logger = logging.getLogger(__name__)
 
-MAX_USER_URLS = 100
+MAX_USER_URLS = 40
 MAX_OUTBOX_ROWS = 10000
 
 

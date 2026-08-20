@@ -221,8 +221,8 @@ TEXTS: dict[str, dict[Language, str]] = {
         "en": "❌ The name, keyword, or URL is too long.",
     },
     "url_limit_reached": {
-        "ru": "❌ Достигнут лимит: не более 100 URL на пользователя.",
-        "en": "❌ Limit reached: no more than 100 URLs per user.",
+        "ru": "❌ Достигнут лимит: не более {limit} URL на пользователя.\n\nЕсли вам нужно больше URL — обратитесь в техподдержку.",
+        "en": "❌ Limit reached: no more than {limit} URLs per user.\n\nIf you need more URLs, please contact tech support.",
     },
     "broadcast_too_long": {
         "ru": "❌ Сообщение слишком длинное. Максимум 4096 символов.",
