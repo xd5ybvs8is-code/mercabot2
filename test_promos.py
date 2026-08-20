@@ -284,6 +284,7 @@ async def _test_promo_unlimited_multi_use(tmp_path) -> None:
     row = next(e for e in entries if e.code == promo.code)
     assert row.redemption_count == 3
     assert row.max_uses is None
+    assert {user_id for user_id, _ in row.redeemed_users} == {"user-1", "user-2", "user-3"}
 
     await db.close()
 
@@ -307,6 +308,7 @@ async def _test_promo_limited_multi_use(tmp_path) -> None:
     entries = await storage.list_promos()
     row = next(e for e in entries if e.code == promo.code)
     assert row.redemption_count == 2
+    assert {user_id for user_id, _ in row.redeemed_users} == {"user-1", "user-2"}
 
     await db.close()
 

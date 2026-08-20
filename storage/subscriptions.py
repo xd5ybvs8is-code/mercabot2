@@ -43,8 +43,7 @@ class PromoCodeRow:
     created_by: str
     created_at: int
     redemption_count: int
-    redeemed_by: str | None
-    redeemed_at: int | None
+    redeemed_users: tuple[tuple[str, int], ...]
 
 
 @dataclass(slots=True, frozen=True)
@@ -520,25 +519,21 @@ class SubscriptionStorage:
             created_by=created_by,
             created_at=now,
             redemption_count=0,
-            redeemed_by=None,
-            redeemed_at=None,
+            redeemed_users=(),
         )
 
     async def list_promos(self) -> list[PromoCodeRow]:
         cursor = await self._db.conn.execute(
             "SELECT p.id, p.code, p.duration_days, p.audience, p.target_user_id, "
             "p.max_uses, p.active, p.expires_at, p.created_by, p.created_at, "
-            "COUNT(r.user_id) AS redemption_count, "
-            "MAX(r.redeemed_at) AS redeemed_at, "
-            "(SELECT r2.user_id FROM promo_redemptions r2 "
-            " WHERE r2.promo_id = p.id ORDER BY r2.redeemed_at DESC, r2.user_id DESC LIMIT 1) AS redeemed_by "
+            "COUNT(r.user_id) AS redemption_count "
             "FROM promo_codes p "
             "LEFT JOIN promo_redemptions r ON r.promo_id = p.id "
             "GROUP BY p.id "
             "ORDER BY p.created_at DESC, p.id DESC",
         )
         rows = await cursor.fetchall()
-        return [
+        promos = [
             PromoCodeRow(
                 id=row["id"],
                 code=row["code"],
@@ -551,10 +546,41 @@ class SubscriptionStorage:
                 created_by=row["created_by"],
                 created_at=row["created_at"],
                 redemption_count=int(row["redemption_count"] or 0),
-                redeemed_by=row["redeemed_by"],
-                redeemed_at=row["redeemed_at"],
+                redeemed_users=(),
             )
             for row in rows
+        ]
+        if not promos:
+            return promos
+
+        ids = [promo.id for promo in promos]
+        placeholders = ",".join("?" for _ in ids)
+        redemption_cursor = await self._db.conn.execute(
+            f"SELECT promo_id, user_id, redeemed_at FROM promo_redemptions "
+            f"WHERE promo_id IN ({placeholders}) ORDER BY redeemed_at ASC, user_id ASC",
+            ids,
+        )
+        by_promo: dict[int, list[tuple[str, int]]] = {promo.id: [] for promo in promos}
+        async for redemption in redemption_cursor:
+            by_promo[int(redemption["promo_id"])].append(
+                (redemption["user_id"], int(redemption["redeemed_at"]))
+            )
+        return [
+            PromoCodeRow(
+                id=promo.id,
+                code=promo.code,
+                duration_days=promo.duration_days,
+                audience=promo.audience,
+                target_user_id=promo.target_user_id,
+                max_uses=promo.max_uses,
+                active=promo.active,
+                expires_at=promo.expires_at,
+                created_by=promo.created_by,
+                created_at=promo.created_at,
+                redemption_count=promo.redemption_count,
+                redeemed_users=tuple(by_promo[promo.id]),
+            )
+            for promo in promos
         ]
 
     async def deactivate_promo(self, raw_code: str) -> bool:

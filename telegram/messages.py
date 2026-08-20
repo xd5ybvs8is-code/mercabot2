@@ -126,10 +126,12 @@ def format_promo_list(entries: list[PromoCodeRow], language: str = "ru") -> str:
         else:
             max_label = "∞" if promo.max_uses is None else str(promo.max_uses)
             redeemed = f"{promo.redemption_count}/{max_label}"
-            if promo.redeemed_by is not None:
-                redeemed += f" — {escape(promo.redeemed_by)}"
-                if promo.redeemed_at is not None:
-                    redeemed += f" ({datetime.fromtimestamp(promo.redeemed_at).strftime('%d.%m.%Y %H:%M')})"
+            if promo.redeemed_users:
+                users = ", ".join(
+                    f"{escape(user_id)} ({datetime.fromtimestamp(redeemed_at).strftime('%d.%m.%Y %H:%M')})"
+                    for user_id, redeemed_at in promo.redeemed_users
+                )
+                redeemed += f" — {users}"
 
         result += text(
             "promo_list_row",
