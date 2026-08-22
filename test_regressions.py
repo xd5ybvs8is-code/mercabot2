@@ -245,3 +245,37 @@ def test_bot_offset_state_persists(tmp_path) -> None:
         await db.close()
 
     asyncio.run(run())
+
+def test_permanent_error_update_is_acknowledged(tmp_path) -> None:
+    async def run() -> None:
+        from telegram.bot import TelegramNotifier
+        from telegram.client import TelegramPermanentError
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.sent = False
+
+            async def call_api_raw(self, _method, _params) -> dict:
+                return {"result": [{
+                    "update_id": 10,
+                    "message": {
+                        "chat": {"id": 123},
+                        "from": {"id": 123},
+                        "text": "/start",
+                    },
+                }]}
+
+            async def call_api_json(self, _method, _payload) -> None:
+                raise TelegramPermanentError(403, "Forbidden: bot was blocked by the user")
+
+        db = DatabaseConnection(tmp_path / "state.db")
+        await db.connect()
+        users = UserStorage(db)
+        bot = TelegramNotifier("token", user_storage=users)
+        bot._client = FakeClient()
+        await bot._fetch_and_handle_updates()
+        assert bot._offset == 11
+        assert await users.get_state("telegram_update_offset") == "11"
+        await db.close()
+
+    asyncio.run(run())

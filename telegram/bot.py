@@ -9,7 +9,7 @@ from urllib.parse import quote_plus
 
 from typing import TYPE_CHECKING
 
-from telegram.client import TelegramClient
+from telegram.client import TelegramClient, TelegramPermanentError
 from telegram.keyboard import (
     BUTTON_ACTIONS,
     ADMIN_BUTTON_ACTIONS,
@@ -412,23 +412,47 @@ class TelegramNotifier:
             if not isinstance(update_id, int):
                 logger.warning("Ignoring Telegram update without valid update_id: %r", update)
                 continue
+            update_chat_id: str | None = None
             try:
                 callback_query = update.get("callback_query")
                 if callback_query is not None:
+                    cq_chat = (callback_query.get("message") or {}).get("chat", {}).get("id")
+                    if cq_chat:
+                        update_chat_id = str(cq_chat)
                     await self._handle_callback_query(callback_query)
                 else:
                     message = update.get("message")
                     if message is not None:
                         chat_id = message.get("chat", {}).get("id")
                         if chat_id:
+                            update_chat_id = str(chat_id)
                             logger.info("💬 Message from user %s: '%s'", chat_id, (message.get("text") or "")[:80])
                             await self._handle_message(str(chat_id), message)
+            except TelegramPermanentError as exc:
+                # Постоянная ошибка Telegram (бот заблокирован, чат удалён и т.п.) —
+                # ретраить бессмысленно. Подтверждаем update, чтобы он не висел
+                # вечно в очереди getUpdates, и чистим чат как потерянный.
+                logger.error(
+                    "💀 Permanent Telegram error on update %s (chat=%s): %s — acknowledging and moving on",
+                    update_id, update_chat_id, exc.description,
+                )
+                if update_chat_id:
+                    try:
+                        await self._on_chat_lost(update_chat_id)
+                    except Exception:
+                        logger.exception("Failed to clean up lost chat %s", update_chat_id)
+                await self._acknowledge_update(update_id)
+                continue
             except Exception:
                 logger.exception("Failed to process Telegram update %s; it will be retried", update_id)
                 break
-            self._offset = update_id + 1
-            if self._user_storage is not None:
-                await self._user_storage.set_state("telegram_update_offset", str(self._offset))
+            await self._acknowledge_update(update_id)
+
+    async def _acknowledge_update(self, update_id: int) -> None:
+        """Продвинуть offset после обработки update и сохранить его."""
+        self._offset = update_id + 1
+        if self._user_storage is not None:
+            await self._user_storage.set_state("telegram_update_offset", str(self._offset))
 
     async def _handle_message(self, chat_id: str, message: dict[str, Any]) -> None:
         text = (message.get("text") or "").strip()

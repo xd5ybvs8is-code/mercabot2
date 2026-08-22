@@ -76,8 +76,8 @@ TEXTS: dict[str, dict[Language, str]] = {
         "en": "✏️ Create a name for this search.\n\nFor example:\nNike sneakers",
     },
     "enter_keyword": {
-        "ru": "🔤 Отправьте ключевое слово для поиска.\n\nОно же будет использовано как имя.\n\nНапример:\nNike кроссовки",
-        "en": "🔤 Send a keyword to search for.\n\nIt will also be used as the name.\n\nFor example:\nNike sneakers",
+        "ru": "🔤 Отправьте ключевое слово для поиска.\n\nОно же будет использовано как имя.\n\nНапример:\nlgb",
+        "en": "🔤 Send a keyword to search for.\n\nIt will also be used as the name.\n\nFor example:\nlgb",
     },
     "enter_url": {
         "ru": "🔗 Отлично! Теперь отправьте URL для этого поиска.\n\nИмя: <b>{name}</b>\n\nПример URL:\nhttps://jp.mercari.com/en/search?category_id=7021\n\nОткуда взять URL - https://telegra.ph/Otkuda-vzyat-URL-08-18",
