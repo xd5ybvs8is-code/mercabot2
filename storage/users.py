@@ -44,6 +44,10 @@ class UserStorage:
         row = await cursor.fetchone()
         return row[0] if row else 0
 
+    async def get_all_chat_ids(self) -> set[str]:
+        rows = await self._db.conn.execute_fetchall("SELECT chat_id FROM users")
+        return {row[0] for row in rows}
+
     async def get_state(self, key: str) -> str | None:
         cursor = await self._db.conn.execute(
             "SELECT value FROM bot_state WHERE key = ?", (key,),

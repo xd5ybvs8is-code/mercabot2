@@ -474,7 +474,10 @@ def make_handlers(
             return text("broadcast_too_long", language)
         logger.info("📢 Admin broadcast from user %s: '%s'", chat_id, message_text[:80])
 
-        chat_ids = await url_storage.get_all_user_chat_ids()
+        chat_ids: set[str] = set()
+        if user_storage is not None:
+            chat_ids |= await user_storage.get_all_chat_ids()
+        chat_ids |= await url_storage.get_all_user_chat_ids()
         sent = 0
         for cid in chat_ids:
             # Рассылка идёт через очередь MessageSender с дросселированием,
